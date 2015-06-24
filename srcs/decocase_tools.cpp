@@ -741,9 +741,11 @@ int main(int argc, char** argv)
 
     if (argc < 4)
     {
-        printf("Usage:\n\n");
-        printf("- Decrypt Type 1:\n");
-        printf("decocase_tools decrypt <input_bin> <input_prom> [<output_bin>]\n");
+        printf("Decrypt Type 1:\n");
+        printf("  decocase_tools decrypt1 <input_bin> <input_prom> [<output_bin>]\n");
+        printf("\n");
+        printf("Decrypt Type 3:\n");
+        printf("  decocase_tools decrypt3 <input_bin> <input_prom> [<output_bin>]\n");
         return 0;
     }
 
