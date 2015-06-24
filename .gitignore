@@ -1,0 +1,8 @@
+srcs/vs2010/Debug/*
+srcs/vs2010/Release/*
+srcs/vs2010/ipch/*
+x64/*
+*.opensdf
+*.sdf
+*.suo
+*.vcxproj.user
