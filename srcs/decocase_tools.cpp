@@ -12,15 +12,16 @@
 // see machine/decocass.c, drivers/decocass.c, etc.
 // https://github.com/mamedev/mame/blob/bf4f1beaa2cd03b4362e52599ddcf4c4a9c32f13/src/mame/machine/decocass.c#L363
 
-#define VERSION     "v0.1 (2015/06/24)"
+#define VERSION     "v0.2 (2015/06/24)"
 
 // v0.1 - initial release (type 1 only, not much tested)
+// v0.2 - fixes, early support for type 3
 
 //-------------------------------------
 // USAGE
 //-------------------------------------
 // Decrypt type 1 deco cassette data:
-// - decocase_tools decrypt DT-1010-A-0.bin DE-0061-A-0.rom DT-1010-A-0.decoded.bin
+// - decocase_tools decrypt1 DT-1010-A-0.bin DE-0061-A-0.rom DT-1010-A-0.decoded.bin
 
 #define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
@@ -28,6 +29,14 @@
 #include <ctype.h>
 
 typedef unsigned char u8;
+
+enum DecoCaseType
+{
+    DecoCaseType_1,
+    DecoCaseType_2,
+    DecoCaseType_3,
+    DecoCaseType_4,
+};
 
 // MAME types
 typedef unsigned char UINT8;
@@ -55,6 +64,21 @@ typedef UINT32 offs_t;
 
 
 #define T1MAP(x, m) (((m)>>(x*3))&7)
+
+enum {
+    TYPE3_SWAP_01,
+    TYPE3_SWAP_12,
+    TYPE3_SWAP_13,
+    TYPE3_SWAP_24,
+    TYPE3_SWAP_25,
+    TYPE3_SWAP_34_0,
+    TYPE3_SWAP_34_7,
+    TYPE3_SWAP_45,
+    TYPE3_SWAP_23_56,
+    TYPE3_SWAP_56,
+    TYPE3_SWAP_67,
+    TYPE3_SWAP_COUNT
+};
 
 #define E5XX_MASK   0x02    /* use 0x0e for old style board */
 
@@ -134,10 +158,18 @@ struct decocass_state
     INT32     m_firsttime;
     UINT8     m_latch1;
 
+    DecoCaseType    m_type;
+
     /* dongle type #1 */
     UINT8*    m_type1_map;
     UINT32    m_type1_inmap;
     UINT32    m_type1_outmap;
+
+    /* dongle type #3: status and patches */
+    INT32     m_type3_ctrs;         /* 12 bit counter stage */
+    INT32     m_type3_d0_latch;     /* latched 8041-D0 value */
+    INT32     m_type3_pal_19;       /* latched 1 for PAL input pin-19 */
+    INT32     m_type3_swap;
 
     decocass_state()
     {
@@ -146,20 +178,241 @@ struct decocass_state
         m_firsttime = 0;
         m_latch1 = 0;
 
+        m_type = DecoCaseType_1;
+
         m_type1_map = NULL;
         m_type1_inmap = MAKE_MAP(0,1,2,3,4,5,6,7);
         m_type1_outmap = MAKE_MAP(0,1,2,3,4,5,6,7);
-    }
-    UINT8 decocass_type1_r(offs_t offset);
 
-    void reset_type1()
-    {
-        //LOG(0,("dongle type #1 (DE-0061 own PROM)\n"));
-        m_dongle_r = &decocass_state::decocass_type1_r;
-        m_type1_map = NULL;//type1_chwy;//type1_latch_27_pass_3_inv_2_table;
-        m_latch1 = 0;
+        m_type3_ctrs = 0;
+        m_type3_d0_latch = 0;
+        m_type3_pal_19 = 0;
+        m_type3_swap = 0;
     }
+
+    void reset()
+    {
+        switch (m_type)
+        {
+        case DecoCaseType_1:
+            //LOG(0,("dongle type #1 (DE-0061 own PROM)\n"));
+            m_dongle_r = &decocass_state::decocass_type1_r;
+            m_type1_map = NULL;//type1_chwy;//type1_latch_27_pass_3_inv_2_table;
+            m_latch1 = 0;
+            break;
+        case DecoCaseType_3:
+            m_dongle_r = &decocass_state::decocass_type3_r;
+            m_type3_ctrs = 0;
+            m_type3_d0_latch = 0;
+            m_type3_pal_19 = 0;
+            m_type3_swap = TYPE3_SWAP_67;
+            break;
+        }
+    }
+
+    UINT8 decocass_type1_r(offs_t offset);
+    UINT8 decocass_type3_r(offs_t offset);
 };
+
+UINT8 decocass_state::decocass_type3_r(offs_t offset)
+{
+    UINT8 data, save;
+
+    if (0)//if (1 == (offset & 1))
+    {
+        if (1 == m_type3_pal_19)
+        {
+            UINT8 *prom = m_prom;//("dongle")->base();
+            data = prom[m_type3_ctrs];
+            //LOG(3,("%10s 6502-PC: %04x decocass_type3_r(%02x): $%02x <- prom[$%03x]\n", space.machine().time().as_string(6), space.device().safe_pcbase(), offset, data, m_type3_ctrs));
+            if (++m_type3_ctrs == 4096)
+                m_type3_ctrs = 0;
+        }
+        else
+        {
+            if (0 == (offset & E5XX_MASK))
+            {
+                data = m_bin[offset];//m_mcu->upi41_master_r(space,1);
+                //LOG(4,("%10s 6502-PC: %04x decocass_type3_r(%02x): $%02x <- 8041 STATUS\n", space.machine().time().as_string(6), space.device().safe_pcbase(), offset, data));
+            }
+            else
+            {
+                data = 0xff;    /* open data bus? */
+                //LOG(4,("%10s 6502-PC: %04x decocass_type3_r(%02x): $%02x <- open bus\n", space.machine().time().as_string(6), space.device().safe_pcbase(), offset, data));
+            }
+        }
+    }
+    else
+    {
+        /*
+        if (1 == m_type3_pal_19)
+        {
+            save = data = 0xff;    // open data bus? 
+            //LOG(3,("%10s 6502-PC: %04x decocass_type3_r(%02x): $%02x <- open bus", space.machine().time().as_string(6), space.device().safe_pcbase(), offset, data));
+        }
+        else
+        */
+        {
+            if (1)//if (0 == (offset & E5XX_MASK))
+            {
+                save = m_bin[offset];//m_mcu->upi41_master_r(space,0);
+                switch (m_type3_swap)
+                {
+                case TYPE3_SWAP_01:
+                    data =
+                        (BIT(save, 1) << 0) |
+                        (m_type3_d0_latch << 1) |
+                        (BIT(save, 2) << 2) |
+                        (BIT(save, 3) << 3) |
+                        (BIT(save, 4) << 4) |
+                        (BIT(save, 5) << 5) |
+                        (BIT(save, 6) << 6) |
+                        (BIT(save, 7) << 7);
+                    break;
+                case TYPE3_SWAP_12:
+                    data =
+                        (m_type3_d0_latch << 0) |
+                        (BIT(save, 2) << 1) |
+                        (BIT(save, 1) << 2) |
+                        (BIT(save, 3) << 3) |
+                        (BIT(save, 4) << 4) |
+                        (BIT(save, 5) << 5) |
+                        (BIT(save, 6) << 6) |
+                        (BIT(save, 7) << 7);
+                    break;
+                case TYPE3_SWAP_13:
+                    data =
+                        (m_type3_d0_latch << 0) |
+                        (BIT(save, 3) << 1) |
+                        (BIT(save, 2) << 2) |
+                        (BIT(save, 1) << 3) |
+                        (BIT(save, 4) << 4) |
+                        (BIT(save, 5) << 5) |
+                        (BIT(save, 6) << 6) |
+                        (BIT(save, 7) << 7);
+                    break;
+                case TYPE3_SWAP_24:
+                    data =
+                        (m_type3_d0_latch << 0) |
+                        (BIT(save, 1) << 1) |
+                        (BIT(save, 4) << 2) |
+                        (BIT(save, 3) << 3) |
+                        (BIT(save, 2) << 4) |
+                        (BIT(save, 5) << 5) |
+                        (BIT(save, 6) << 6) |
+                        (BIT(save, 7) << 7);
+                    break;
+                case TYPE3_SWAP_25:
+                    data =
+                        (m_type3_d0_latch << 0) |
+                        (BIT(save, 1) << 1) |
+                        (BIT(save, 5) << 2) |
+                        (BIT(save, 3) << 3) |
+                        (BIT(save, 4) << 4) |
+                        (BIT(save, 2) << 5) |
+                        (BIT(save, 6) << 6) |
+                        (BIT(save, 7) << 7);
+                    break;
+                case TYPE3_SWAP_34_0:
+                    data =
+                        (m_type3_d0_latch << 0) |
+                        (BIT(save, 1) << 1) |
+                        (BIT(save, 2) << 2) |
+                        (BIT(save, 3) << 4) |
+                        (BIT(save, 4) << 3) |
+                        (BIT(save, 5) << 5) |
+                        (BIT(save, 6) << 6) |
+                        (BIT(save, 7) << 7);
+                    break;
+                case TYPE3_SWAP_34_7:
+                    data =
+                        (BIT(save, 7) << 0) |
+                        (BIT(save, 1) << 1) |
+                        (BIT(save, 2) << 2) |
+                        (BIT(save, 4) << 3) |
+                        (BIT(save, 3) << 4) |
+                        (BIT(save, 5) << 5) |
+                        (BIT(save, 6) << 6) |
+                        (m_type3_d0_latch << 7);
+                    break;
+                case TYPE3_SWAP_45:
+                    data =
+                        m_type3_d0_latch |
+                        (BIT(save, 1) << 1) |
+                        (BIT(save, 2) << 2) |
+                        (BIT(save, 3) << 3) |
+                        (BIT(save, 5) << 4) |
+                        (BIT(save, 4) << 5) |
+                        (BIT(save, 6) << 6) |
+                        (BIT(save, 7) << 7);
+                    break;
+                case TYPE3_SWAP_23_56:
+                    data =
+                        (m_type3_d0_latch << 0) |
+                        (BIT(save, 1) << 1) |
+                        (BIT(save, 3) << 2) |
+                        (BIT(save, 2) << 3) |
+                        (BIT(save, 4) << 4) |
+                        (BIT(save, 6) << 5) |
+                        (BIT(save, 5) << 6) |
+                        (BIT(save, 7) << 7);
+                    break;
+                case TYPE3_SWAP_56:
+                    data =
+                        m_type3_d0_latch |
+                        (BIT(save, 1) << 1) |
+                        (BIT(save, 2) << 2) |
+                        (BIT(save, 3) << 3) |
+                        (BIT(save, 4) << 4) |
+                        (BIT(save, 6) << 5) |
+                        (BIT(save, 5) << 6) |
+                        (BIT(save, 7) << 7);
+                    break;
+                case TYPE3_SWAP_67:
+                    data =
+                        m_type3_d0_latch |
+                        (BIT(save, 1) << 1) |
+                        (BIT(save, 2) << 2) |
+                        (BIT(save, 3) << 3) |
+                        (BIT(save, 4) << 4) |
+                        (BIT(save, 5) << 5) |
+                        (BIT(save, 7) << 6) |
+                        (BIT(save, 6) << 7);
+                    break;
+                default:
+                    data =
+                        m_type3_d0_latch |
+                        (BIT(save, 1) << 1) |
+                        (BIT(save, 2) << 2) |
+                        (BIT(save, 3) << 3) |
+                        (BIT(save, 4) << 4) |
+                        (BIT(save, 5) << 5) |
+                        (BIT(save, 6) << 6) |
+                        (BIT(save, 7) << 7);
+                }
+                m_type3_d0_latch = save & 1;
+                //LOG(3,("%10s 6502-PC: %04x decocass_type3_r(%02x): $%02x '%c' <- 8041-DATA\n", space.machine().time().as_string(6), space.device().safe_pcbase(), offset, data, (data >= 32) ? data : '.'));
+            }
+            else
+            {
+                save = 0xff;    /* open data bus? */
+                data =
+                    m_type3_d0_latch |
+                    (BIT(save, 1) << 1) |
+                    (BIT(save, 2) << 2) |
+                    (BIT(save, 3) << 3) |
+                    (BIT(save, 4) << 4) |
+                    (BIT(save, 5) << 5) |
+                    (BIT(save, 6) << 7) |
+                    (BIT(save, 7) << 6);
+                //LOG(3,("%10s 6502-PC: %04x decocass_type3_r(%02x): $%02x '%c' <- open bus (D0 replaced with latch)\n", space.machine().time().as_string(6), space.device().safe_pcbase(), offset, data, (data >= 32) ? data : '.'));
+                m_type3_d0_latch = save & 1;
+            }
+        }
+    }
+
+    return data;
+}
 
 UINT8 decocass_state::decocass_type1_r(offs_t offset)
 {
@@ -262,7 +515,7 @@ void DumpMemory(const u8* data, int len, int columns = 16, int addr_offset = 0)
     }
 }
 
-int decocase_decrypt(int argc, char** argv)
+int decocase_decrypt(DecoCaseType type, int argc, char** argv)
 {
     int arg = 0;
 
@@ -282,9 +535,10 @@ int decocase_decrypt(int argc, char** argv)
         return 1;
 
     decocass_state state;
+    state.m_type = type;
     state.m_bin = bin_data;
     state.m_prom = prom_data;
-    state.reset_type1();
+    state.reset();
 
     bool found = false;
 
@@ -294,17 +548,19 @@ int decocase_decrypt(int argc, char** argv)
     // rather than parsing it I am trying all 4^8 = 64K combinations..
 
     UINT8 type1_map[8];
-
     if (0)
     {
         //{ T1PROM, T1PROM, T1LATCHINV, T1PROM, T1PROM, T1DIRECT, T1LATCH, T1PROM };
         //{ T1PROM,T1PROM,T1LATCHINV,T1PROM,T1PROM,T1DIRECT,T1LATCH,T1PROM }; // Explorer
-        UINT8 known_map[8] = { T1PROM,T1LATCHINV,T1PROM,T1DIRECT,T1PROM,T1PROM,T1LATCH,T1PROM }; // Astro Fantasia DT-1074-C-0
+        //UINT8 known_map[8] = { T1PROM,T1LATCHINV,T1PROM,T1DIRECT,T1PROM,T1PROM,T1LATCH,T1PROM }; // Astro Fantasia DT-1074-C-0
+        //UINT8 known_map[8] = { T1PROM,T1DIRECT,T1PROM,T1DIRECT,T1PROM,T1PROM,T1DIRECT,T1PROM }; // Ninja DT-1021-D-0
+        //UINT8 known_map[8] = { T1LATCHINV,T1PROM,T1PROM,T1DIRECT,T1PROM,T1PROM,T1LATCH,T1PROM }; // Treasure Island DT-1160-A-0
+        UINT8 known_map[8] = { T1LATCHINV,T1PROM,T1PROM,T1DIRECT,T1PROM,T1PROM,T1LATCH,T1PROM }; // Treasure Island DT-1160-B-0
         //10110101
 
         memcpy(type1_map, known_map, sizeof(type1_map));
 
-        state.reset_type1();
+        state.reset();
         state.m_type1_map = type1_map;
         found = true;
     }
@@ -330,7 +586,7 @@ int decocase_decrypt(int argc, char** argv)
         }
     };
 
-    if (!found)
+    if (!found && type == DecoCaseType_1)
     {
         int comb_count = 1024*64;
         //int comb_count = (5*5*5*5)*(5*5*5*5);
@@ -343,17 +599,17 @@ int decocase_decrypt(int argc, char** argv)
         {
             f::WriteMask(type1_map, comb_no);
 
-            state.reset_type1();
+            state.reset();
             state.m_type1_map = type1_map;
             UINT8 hdr[64];
             for (int i = 0; i < 5; i++)
-                hdr[i] = state.decocass_type1_r(i);
+                hdr[i] = (state.*state.m_dongle_r)(i);
 
-            if (memcmp(hdr+1, "HDRA", 4) == 0 || memcmp(hdr+1, "HDRB", 4) == 0 || memcmp(hdr+1, "HDRC", 4) == 0)
+            if (memcmp(hdr+1, "HDRA", 4) == 0 || memcmp(hdr+1, "HDRB", 4) == 0 || memcmp(hdr+1, "HDRC", 4) == 0 || memcmp(hdr+1, "HDRD", 4) == 0)
             {
                 found = true;
                 for (int i = 5; i < 64; i++)
-                    hdr[i] = state.decocass_type1_r(i);
+                    hdr[i] = (state.*state.m_dongle_r)(i);
 
                 int score = 0;
                 for (int i = 0; i < 64; i++)
@@ -369,27 +625,73 @@ int decocase_decrypt(int argc, char** argv)
         }
         if (found)
             f::WriteMask(type1_map, comb_best_no);
+        if (!found)
+        {
+            printf("Error: couldn't find a suitable bit mapping.\n");
+            return 1;
+        }
     }
-
-    if (!found)
+    if (!found && type == DecoCaseType_3)
     {
-        printf("Error: couldn't find a suitable bit mapping.\n");
-        return 1;
+        int comb_count = TYPE3_SWAP_COUNT;
+        int comb_best_no = -1;
+        int comb_best_score = -1;
+
+        printf("Bruteforce bit swap mode looking for 'HDR' string (%d combinations)...\n", comb_count);
+        for (int comb_no = 0; comb_no < comb_count; comb_no++)
+        {
+            state.reset();
+            state.m_type3_swap = comb_no;
+
+            UINT8 hdr[64];
+            for (int i = 0; i < 5; i++)
+                hdr[i] = (state.*state.m_dongle_r)(i);
+
+            if (memcmp(hdr+1, "HDR", 3) == 0)// || memcmp(hdr+1, "HDRB", 4) == 0 || memcmp(hdr+1, "HDRC", 4) == 0 || memcmp(hdr+1, "HDRD", 4) == 0)
+            {
+                found = true;
+                for (int i = 5; i < 64; i++)
+                    hdr[i] = (state.*state.m_dongle_r)(i);
+
+                int score = 0;
+                for (int i = 0; i < 64; i++)
+                    score += isalnum(hdr[i]) ? 1 : 0; 
+                if (comb_best_score < score)
+                {
+                    //printf("new best score %d for comb %d\n", score, comb_no);
+                    comb_best_score = score;
+                    comb_best_no = comb_no;
+                }
+                //break;
+            }
+        }
+        if (!found)
+        {
+            printf("Error: couldn't find a suitable bit swap mapping.\n");
+            return 1;
+        }
+        state.reset();
+        state.m_type3_swap = comb_best_no;
+
+        printf("Using swap mode: %d\n", state.m_type3_swap);
     }
 
-    printf("Found combination: ");
-    for (int bit = 0; bit < 8; bit++)
+    if (type == DecoCaseType_1)
     {
-        const char* names[] = { "DIRECT", "PROM", "LATCH", "LATCHINV", "DIRECTINV" };
-        printf(bit < 7 ? "%s, " : "%s\n", names[type1_map[bit]]);
-    }
+        printf("Found combination: ");
+        for (int bit = 0; bit < 8; bit++)
+        {
+            const char* names[] = { "DIRECT", "PROM", "LATCH", "LATCHINV", "DIRECTINV" };
+            printf(bit < 7 ? "%s, " : "%s\n", names[type1_map[bit]]);
+        }
 
-    printf("Latched bits                          = $%02X\n", f::GetMaskForType(type1_map, T1LATCH) | f::GetMaskForType(type1_map, T1LATCHINV));
-    printf("Latched bits uninverted               = $%02X\n", f::GetMaskForType(type1_map, T1LATCH));
-    printf("Latched bits inverted                 = $%02X\n", f::GetMaskForType(type1_map, T1LATCHINV));
-    printf("Input bits that are passed uninverted = $%02X\n", f::GetMaskForType(type1_map, T1DIRECT));
-    printf("Input bits that are passed inverted   = $00\n");
-    printf("Remaining bits for addressing PROM    = $%02X\n", f::GetMaskForType(type1_map, T1PROM));
+        printf("Latched bits                          = $%02X\n", f::GetMaskForType(type1_map, T1LATCH) | f::GetMaskForType(type1_map, T1LATCHINV));
+        printf("Latched bits uninverted               = $%02X\n", f::GetMaskForType(type1_map, T1LATCH));
+        printf("Latched bits inverted                 = $%02X\n", f::GetMaskForType(type1_map, T1LATCHINV));
+        printf("Input bits that are passed uninverted = $%02X\n", f::GetMaskForType(type1_map, T1DIRECT));
+        printf("Input bits that are passed inverted   = $00\n");
+        printf("Remaining bits for addressing PROM    = $%02X\n", f::GetMaskForType(type1_map, T1PROM));
+    }
 
     /*
     Latched bits                          = $24 (2 latch bits)
@@ -409,7 +711,7 @@ int decocase_decrypt(int argc, char** argv)
     // Decode
     u8* bin_decoded = new u8[bin_len];
     for (int i = 0; i < bin_len; i++)
-        bin_decoded[i] = state.decocass_type1_r(i);
+        bin_decoded[i] = (state.*state.m_dongle_r)(i);
 
     // Dump header for reference
     //printf("\nINPUT BIN:\n");
@@ -445,10 +747,17 @@ int main(int argc, char** argv)
         return 0;
     }
 
-    if (strcmp(argv[1], "decrypt") == 0)
+    if (strcmp(argv[1], "decrypt1") == 0)
     {
-        printf("Command: Decrypt\n");
-        int ret = decocase_decrypt(argc-2, argv+2);
+        printf("Command: Decrypt Type 1\n");
+        int ret = decocase_decrypt(DecoCaseType_1, argc-2, argv+2);
+        //getc(stdin);
+        return ret;
+    }
+    else if (strcmp(argv[1], "decrypt3") == 0)
+    {
+        printf("Command: Decrypt Type 3\n");
+        int ret = decocase_decrypt(DecoCaseType_3, argc-2, argv+2);
         //getc(stdin);
         return ret;
     }

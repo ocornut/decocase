@@ -6,5 +6,5 @@ echo ---------------------------------------------------------------------------
 echo Folder: %cd%
 rem echo bin = %BIN_FILE%
 rem echo rom = %ROM_FILE%
-call decotools decrypt %BIN_FILE% %ROM_FILE%
+call decotools decrypt3 %BIN_FILE% %ROM_FILE%
 
