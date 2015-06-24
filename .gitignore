@@ -1,3 +1,4 @@
+data/*
 srcs/vs2010/Debug/*
 srcs/vs2010/Release/*
 srcs/vs2010/ipch/*
