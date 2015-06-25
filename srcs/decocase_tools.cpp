@@ -94,8 +94,7 @@ const UINT32 TYPE1_IO_MAPS[TYPE1_IO_MAPS_COUNT] =
     MAKE_MAP(1,0,2,3,4,5,6,7), // cprogolf, cprogolfj
     MAKE_MAP(0,3,2,1,4,5,6,7), // cluckypo
     MAKE_MAP(2,1,0,3,4,5,6,7), // ctisland
-
-    MAKE_MAP(0,1,2,4,3,5,6,7), // explorer
+    MAKE_MAP(0,1,2,4,3,5,6,7), // explorer  // not in mame
 
 };
 
@@ -236,198 +235,143 @@ UINT8 decocass_state::decocass_type3_r(offs_t offset)
 {
     UINT8 data, save;
 
-    if (0)//if (1 == (offset & 1))
+    save = m_bin[offset];//m_mcu->upi41_master_r(space,0);
+    switch (m_type3_swap)
     {
-        if (1 == m_type3_pal_19)
-        {
-            UINT8 *prom = m_prom;//("dongle")->base();
-            data = prom[m_type3_ctrs];
-            //LOG(3,("%10s 6502-PC: %04x decocass_type3_r(%02x): $%02x <- prom[$%03x]\n", space.machine().time().as_string(6), space.device().safe_pcbase(), offset, data, m_type3_ctrs));
-            if (++m_type3_ctrs == 4096)
-                m_type3_ctrs = 0;
-        }
-        else
-        {
-            if (0 == (offset & E5XX_MASK))
-            {
-                data = m_bin[offset];//m_mcu->upi41_master_r(space,1);
-                //LOG(4,("%10s 6502-PC: %04x decocass_type3_r(%02x): $%02x <- 8041 STATUS\n", space.machine().time().as_string(6), space.device().safe_pcbase(), offset, data));
-            }
-            else
-            {
-                data = 0xff;    /* open data bus? */
-                //LOG(4,("%10s 6502-PC: %04x decocass_type3_r(%02x): $%02x <- open bus\n", space.machine().time().as_string(6), space.device().safe_pcbase(), offset, data));
-            }
-        }
+    case TYPE3_SWAP_01:
+        data =
+            (BIT(save, 1) << 0) |
+            (m_type3_d0_latch << 1) |
+            (BIT(save, 2) << 2) |
+            (BIT(save, 3) << 3) |
+            (BIT(save, 4) << 4) |
+            (BIT(save, 5) << 5) |
+            (BIT(save, 6) << 6) |
+            (BIT(save, 7) << 7);
+        break;
+    case TYPE3_SWAP_12:
+        data =
+            (m_type3_d0_latch << 0) |
+            (BIT(save, 2) << 1) |
+            (BIT(save, 1) << 2) |
+            (BIT(save, 3) << 3) |
+            (BIT(save, 4) << 4) |
+            (BIT(save, 5) << 5) |
+            (BIT(save, 6) << 6) |
+            (BIT(save, 7) << 7);
+        break;
+    case TYPE3_SWAP_13:
+        data =
+            (m_type3_d0_latch << 0) |
+            (BIT(save, 3) << 1) |
+            (BIT(save, 2) << 2) |
+            (BIT(save, 1) << 3) |
+            (BIT(save, 4) << 4) |
+            (BIT(save, 5) << 5) |
+            (BIT(save, 6) << 6) |
+            (BIT(save, 7) << 7);
+        break;
+    case TYPE3_SWAP_24:
+        data =
+            (m_type3_d0_latch << 0) |
+            (BIT(save, 1) << 1) |
+            (BIT(save, 4) << 2) |
+            (BIT(save, 3) << 3) |
+            (BIT(save, 2) << 4) |
+            (BIT(save, 5) << 5) |
+            (BIT(save, 6) << 6) |
+            (BIT(save, 7) << 7);
+        break;
+    case TYPE3_SWAP_25:
+        data =
+            (m_type3_d0_latch << 0) |
+            (BIT(save, 1) << 1) |
+            (BIT(save, 5) << 2) |
+            (BIT(save, 3) << 3) |
+            (BIT(save, 4) << 4) |
+            (BIT(save, 2) << 5) |
+            (BIT(save, 6) << 6) |
+            (BIT(save, 7) << 7);
+        break;
+    case TYPE3_SWAP_34_0:
+        data =
+            (m_type3_d0_latch << 0) |
+            (BIT(save, 1) << 1) |
+            (BIT(save, 2) << 2) |
+            (BIT(save, 3) << 4) |
+            (BIT(save, 4) << 3) |
+            (BIT(save, 5) << 5) |
+            (BIT(save, 6) << 6) |
+            (BIT(save, 7) << 7);
+        break;
+    case TYPE3_SWAP_34_7:
+        data =
+            (BIT(save, 7) << 0) |
+            (BIT(save, 1) << 1) |
+            (BIT(save, 2) << 2) |
+            (BIT(save, 4) << 3) |
+            (BIT(save, 3) << 4) |
+            (BIT(save, 5) << 5) |
+            (BIT(save, 6) << 6) |
+            (m_type3_d0_latch << 7);
+        break;
+    case TYPE3_SWAP_45:
+        data =
+            m_type3_d0_latch |
+            (BIT(save, 1) << 1) |
+            (BIT(save, 2) << 2) |
+            (BIT(save, 3) << 3) |
+            (BIT(save, 5) << 4) |
+            (BIT(save, 4) << 5) |
+            (BIT(save, 6) << 6) |
+            (BIT(save, 7) << 7);
+        break;
+    case TYPE3_SWAP_23_56:
+        data =
+            (m_type3_d0_latch << 0) |
+            (BIT(save, 1) << 1) |
+            (BIT(save, 3) << 2) |
+            (BIT(save, 2) << 3) |
+            (BIT(save, 4) << 4) |
+            (BIT(save, 6) << 5) |
+            (BIT(save, 5) << 6) |
+            (BIT(save, 7) << 7);
+        break;
+    case TYPE3_SWAP_56:
+        data =
+            m_type3_d0_latch |
+            (BIT(save, 1) << 1) |
+            (BIT(save, 2) << 2) |
+            (BIT(save, 3) << 3) |
+            (BIT(save, 4) << 4) |
+            (BIT(save, 6) << 5) |
+            (BIT(save, 5) << 6) |
+            (BIT(save, 7) << 7);
+        break;
+    case TYPE3_SWAP_67:
+        data =
+            m_type3_d0_latch |
+            (BIT(save, 1) << 1) |
+            (BIT(save, 2) << 2) |
+            (BIT(save, 3) << 3) |
+            (BIT(save, 4) << 4) |
+            (BIT(save, 5) << 5) |
+            (BIT(save, 7) << 6) |
+            (BIT(save, 6) << 7);
+        break;
+    default:
+        data =
+            m_type3_d0_latch |
+            (BIT(save, 1) << 1) |
+            (BIT(save, 2) << 2) |
+            (BIT(save, 3) << 3) |
+            (BIT(save, 4) << 4) |
+            (BIT(save, 5) << 5) |
+            (BIT(save, 6) << 6) |
+            (BIT(save, 7) << 7);
     }
-    else
-    {
-        /*
-        if (1 == m_type3_pal_19)
-        {
-            save = data = 0xff;    // open data bus? 
-            //LOG(3,("%10s 6502-PC: %04x decocass_type3_r(%02x): $%02x <- open bus", space.machine().time().as_string(6), space.device().safe_pcbase(), offset, data));
-        }
-        else
-        */
-        {
-            if (1)//if (0 == (offset & E5XX_MASK))
-            {
-                save = m_bin[offset];//m_mcu->upi41_master_r(space,0);
-                switch (m_type3_swap)
-                {
-                case TYPE3_SWAP_01:
-                    data =
-                        (BIT(save, 1) << 0) |
-                        (m_type3_d0_latch << 1) |
-                        (BIT(save, 2) << 2) |
-                        (BIT(save, 3) << 3) |
-                        (BIT(save, 4) << 4) |
-                        (BIT(save, 5) << 5) |
-                        (BIT(save, 6) << 6) |
-                        (BIT(save, 7) << 7);
-                    break;
-                case TYPE3_SWAP_12:
-                    data =
-                        (m_type3_d0_latch << 0) |
-                        (BIT(save, 2) << 1) |
-                        (BIT(save, 1) << 2) |
-                        (BIT(save, 3) << 3) |
-                        (BIT(save, 4) << 4) |
-                        (BIT(save, 5) << 5) |
-                        (BIT(save, 6) << 6) |
-                        (BIT(save, 7) << 7);
-                    break;
-                case TYPE3_SWAP_13:
-                    data =
-                        (m_type3_d0_latch << 0) |
-                        (BIT(save, 3) << 1) |
-                        (BIT(save, 2) << 2) |
-                        (BIT(save, 1) << 3) |
-                        (BIT(save, 4) << 4) |
-                        (BIT(save, 5) << 5) |
-                        (BIT(save, 6) << 6) |
-                        (BIT(save, 7) << 7);
-                    break;
-                case TYPE3_SWAP_24:
-                    data =
-                        (m_type3_d0_latch << 0) |
-                        (BIT(save, 1) << 1) |
-                        (BIT(save, 4) << 2) |
-                        (BIT(save, 3) << 3) |
-                        (BIT(save, 2) << 4) |
-                        (BIT(save, 5) << 5) |
-                        (BIT(save, 6) << 6) |
-                        (BIT(save, 7) << 7);
-                    break;
-                case TYPE3_SWAP_25:
-                    data =
-                        (m_type3_d0_latch << 0) |
-                        (BIT(save, 1) << 1) |
-                        (BIT(save, 5) << 2) |
-                        (BIT(save, 3) << 3) |
-                        (BIT(save, 4) << 4) |
-                        (BIT(save, 2) << 5) |
-                        (BIT(save, 6) << 6) |
-                        (BIT(save, 7) << 7);
-                    break;
-                case TYPE3_SWAP_34_0:
-                    data =
-                        (m_type3_d0_latch << 0) |
-                        (BIT(save, 1) << 1) |
-                        (BIT(save, 2) << 2) |
-                        (BIT(save, 3) << 4) |
-                        (BIT(save, 4) << 3) |
-                        (BIT(save, 5) << 5) |
-                        (BIT(save, 6) << 6) |
-                        (BIT(save, 7) << 7);
-                    break;
-                case TYPE3_SWAP_34_7:
-                    data =
-                        (BIT(save, 7) << 0) |
-                        (BIT(save, 1) << 1) |
-                        (BIT(save, 2) << 2) |
-                        (BIT(save, 4) << 3) |
-                        (BIT(save, 3) << 4) |
-                        (BIT(save, 5) << 5) |
-                        (BIT(save, 6) << 6) |
-                        (m_type3_d0_latch << 7);
-                    break;
-                case TYPE3_SWAP_45:
-                    data =
-                        m_type3_d0_latch |
-                        (BIT(save, 1) << 1) |
-                        (BIT(save, 2) << 2) |
-                        (BIT(save, 3) << 3) |
-                        (BIT(save, 5) << 4) |
-                        (BIT(save, 4) << 5) |
-                        (BIT(save, 6) << 6) |
-                        (BIT(save, 7) << 7);
-                    break;
-                case TYPE3_SWAP_23_56:
-                    data =
-                        (m_type3_d0_latch << 0) |
-                        (BIT(save, 1) << 1) |
-                        (BIT(save, 3) << 2) |
-                        (BIT(save, 2) << 3) |
-                        (BIT(save, 4) << 4) |
-                        (BIT(save, 6) << 5) |
-                        (BIT(save, 5) << 6) |
-                        (BIT(save, 7) << 7);
-                    break;
-                case TYPE3_SWAP_56:
-                    data =
-                        m_type3_d0_latch |
-                        (BIT(save, 1) << 1) |
-                        (BIT(save, 2) << 2) |
-                        (BIT(save, 3) << 3) |
-                        (BIT(save, 4) << 4) |
-                        (BIT(save, 6) << 5) |
-                        (BIT(save, 5) << 6) |
-                        (BIT(save, 7) << 7);
-                    break;
-                case TYPE3_SWAP_67:
-                    data =
-                        m_type3_d0_latch |
-                        (BIT(save, 1) << 1) |
-                        (BIT(save, 2) << 2) |
-                        (BIT(save, 3) << 3) |
-                        (BIT(save, 4) << 4) |
-                        (BIT(save, 5) << 5) |
-                        (BIT(save, 7) << 6) |
-                        (BIT(save, 6) << 7);
-                    break;
-                default:
-                    data =
-                        m_type3_d0_latch |
-                        (BIT(save, 1) << 1) |
-                        (BIT(save, 2) << 2) |
-                        (BIT(save, 3) << 3) |
-                        (BIT(save, 4) << 4) |
-                        (BIT(save, 5) << 5) |
-                        (BIT(save, 6) << 6) |
-                        (BIT(save, 7) << 7);
-                }
-                m_type3_d0_latch = save & 1;
-                //LOG(3,("%10s 6502-PC: %04x decocass_type3_r(%02x): $%02x '%c' <- 8041-DATA\n", space.machine().time().as_string(6), space.device().safe_pcbase(), offset, data, (data >= 32) ? data : '.'));
-            }
-            else
-            {
-                save = 0xff;    /* open data bus? */
-                data =
-                    m_type3_d0_latch |
-                    (BIT(save, 1) << 1) |
-                    (BIT(save, 2) << 2) |
-                    (BIT(save, 3) << 3) |
-                    (BIT(save, 4) << 4) |
-                    (BIT(save, 5) << 5) |
-                    (BIT(save, 6) << 7) |
-                    (BIT(save, 7) << 6);
-                //LOG(3,("%10s 6502-PC: %04x decocass_type3_r(%02x): $%02x '%c' <- open bus (D0 replaced with latch)\n", space.machine().time().as_string(6), space.device().safe_pcbase(), offset, data, (data >= 32) ? data : '.'));
-                m_type3_d0_latch = save & 1;
-            }
-        }
-    }
+    m_type3_d0_latch = save & 1;
+    //LOG(3,("%10s 6502-PC: %04x decocass_type3_r(%02x): $%02x '%c' <- 8041-DATA\n", space.machine().time().as_string(6), space.device().safe_pcbase(), offset, data, (data >= 32) ? data : '.'));
 
     return data;
 }
@@ -438,83 +382,41 @@ UINT8 decocass_state::decocass_type1_r(offs_t offset)
         return 0x00;
 
     UINT8 data = m_bin[offset];
+    UINT8 *prom = m_prom;//space.machine().root_device().memregion("dongle")->base();
+    UINT8 save = data;    /* save the unmodifed data for the latch */
 
-    if (0)//if (1 == (offset & 1))
+    offs_t promaddr = 0;
+    offs_t prommask = m_prom_mask;
+    int promshift = 0;
+
+    #define T1MAP(x, m) (((m)>>(x*3))&7)
+    for (int i=0;i<8;i++)
     {
-        /*
-        if (0 == (offset & E5XX_MASK))
-            data = m_mcu->upi41_master_r(space,1);
-        else
-            data = 0xff;
-            */
-        data = (BIT(data, 0) << 0) | (BIT(data, 1) << 1) | 0x7c;
-        //LOG(4,("%10s 6502-PC: %04x decocass_type1_r(%02x): $%02x <- (%s %s)\n",
-        //    space.machine().time().as_string(6), space.device().safe_pcbase(), offset, data,
-        //    (data & 1) ? "OBF" : "-",
-        //    (data & 2) ? "IBF" : "-"));
+        if (m_type1_map[i] == T1PROM || m_type1_map[i] == T1PROMINV) { promaddr |= (((data >> T1MAP(i,m_type1_inmap)) & 1) << promshift); promshift++; }
     }
-    else
+
+    //if (promshift!=5)
+    //    printf("promshift != 5? (you specified more/less than 5 prom source bits)\n");
+
+    data = 0;
+    promshift = 0;
+
+    // PROM, LATCHINV, PROM, DIRECT, PROM, PROM, LATCH, PROM
+
+    for (int i=0;i<8;i++)
     {
-        UINT8 save;
-        UINT8 *prom = m_prom;//space.machine().root_device().memregion("dongle")->base();
-
-        /*
-        if (m_firsttime)
-        {
-            LOG(3,("prom data:\n"));
-            for (int promaddr = 0; promaddr < 32; promaddr++)
-            {
-                if (promaddr % 8 == 0)
-                    LOG(3,("  %02x:", promaddr));
-                LOG(3,(" %02x%s", prom[promaddr], (promaddr % 8) == 7 ? "\n" : ""));
-            }
-            m_firsttime = 0;
-            m_latch1 = 0;    // reset latch (??)
-        }
-        */
-
- /*
-        if (0 == (offset & E5XX_MASK))
-            data = m_mcu->upi41_master_r(space,0);
-        else
-            data = 0xff;
-*/
-
-        save = data;    /* save the unmodifed data for the latch */
-
-        offs_t promaddr = 0;
-        offs_t prommask = m_prom_mask;
-        int promshift = 0;
-
-        #define T1MAP(x, m) (((m)>>(x*3))&7)
-        for (int i=0;i<8;i++)
-        {
-            if (m_type1_map[i] == T1PROM || m_type1_map[i] == T1PROMINV) { promaddr |= (((data >> T1MAP(i,m_type1_inmap)) & 1) << promshift); promshift++; }
-        }
-
-        //if (promshift!=5)
-        //    printf("promshift != 5? (you specified more/less than 5 prom source bits)\n");
-
-        data = 0;
-        promshift = 0;
-
-        // PROM, LATCHINV, PROM, DIRECT, PROM, PROM, LATCH, PROM
-
-        for (int i=0;i<8;i++)
-        {
-            if (m_type1_map[i] == T1PROM)     { data |= (((prom[promaddr] >> promshift) & 1)                << T1MAP(i,m_type1_outmap)); promshift++; }
-            if (m_type1_map[i] == T1PROMINV)  { data |= ((1 - ((prom[promaddr] >> promshift) & 1))          << T1MAP(i,m_type1_outmap)); promshift++; }
-            if (m_type1_map[i] == T1LATCHINV) { data |= ((1 - ((m_latch1 >> T1MAP(i,m_type1_inmap)) & 1))   << T1MAP(i,m_type1_outmap)); }
-            if (m_type1_map[i] == T1LATCH)    { data |= (((m_latch1 >> T1MAP(i,m_type1_inmap)) & 1)         << T1MAP(i,m_type1_outmap)); }
-            if (m_type1_map[i] == T1DIRECT)   { data |= (((save >> T1MAP(i,m_type1_inmap)) & 1)             << T1MAP(i,m_type1_outmap)); }
-            if (m_type1_map[i] == T1DIRECTINV){ data |= ((1 - ((save >> T1MAP(i,m_type1_inmap)) & 1))       << T1MAP(i,m_type1_outmap)); }
-        }
-
-        //LOG(3,("%10s 6502-PC: %04x decocass_type1_r(%02x): $%02x\n",
-        //    space.machine().time().as_string(6), space.device().safe_pcbase(), offset, data));
-
-        m_latch1 = save;        /* latch the data for the next A0 == 0 read */
+        if (m_type1_map[i] == T1PROM)     { data |= (((prom[promaddr] >> promshift) & 1)                << T1MAP(i,m_type1_outmap)); promshift++; }
+        if (m_type1_map[i] == T1PROMINV)  { data |= ((1 - ((prom[promaddr] >> promshift) & 1))          << T1MAP(i,m_type1_outmap)); promshift++; }
+        if (m_type1_map[i] == T1LATCHINV) { data |= ((1 - ((m_latch1 >> T1MAP(i,m_type1_inmap)) & 1))   << T1MAP(i,m_type1_outmap)); }
+        if (m_type1_map[i] == T1LATCH)    { data |= (((m_latch1 >> T1MAP(i,m_type1_inmap)) & 1)         << T1MAP(i,m_type1_outmap)); }
+        if (m_type1_map[i] == T1DIRECT)   { data |= (((save >> T1MAP(i,m_type1_inmap)) & 1)             << T1MAP(i,m_type1_outmap)); }
+        if (m_type1_map[i] == T1DIRECTINV){ data |= ((1 - ((save >> T1MAP(i,m_type1_inmap)) & 1))       << T1MAP(i,m_type1_outmap)); }
     }
+
+    //LOG(3,("%10s 6502-PC: %04x decocass_type1_r(%02x): $%02x\n",
+    //    space.machine().time().as_string(6), space.device().safe_pcbase(), offset, data));
+
+    m_latch1 = save;        /* latch the data for the next A0 == 0 read */
 
     return data;
 }
@@ -842,21 +744,6 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
         printf(")\n");
     }
 
-    /*
-    Latched bits                          = $24 (2 latch bits)
-    Input bits that are passed uninverted = $08 (1 true bits)
-    Input bits that are passed inverted   = $00 (0 inverted bits)
-    Remaining bits for addressing PROM    = $D3 (5 bits)
-    Latched bit #0:
-    - Input bit position  = 2
-    - Output bit position = 2
-    - Type                = Inverting latch
-    Latched bit #1:
-    - Input bit position  = 5
-    - Output bit position = 5
-    - Type                = Non-inverting latch
-    */
-
     // Decode
     u8* bin_decoded = new u8[bin_len];
     for (int i = 0; i < bin_len; i++)
@@ -893,7 +780,6 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
     //         plpp dpip      plpp dpip
     //   $48 : 0100.1000           1        = $7b (latch = $7b)
     //         plpp dpip      plpp dpip
-
 
     return 0;
 }
