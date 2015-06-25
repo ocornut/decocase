@@ -53,7 +53,10 @@ typedef UINT32 offs_t;
 #define T1PROM 1
 #define T1LATCH 2
 #define T1LATCHINV 3
-#define T1DIRECTINV 4 // <-- not in MAME
+#define T1PROMINV 4 // <-- not in MAME
+#define T1DIRECTINV 5 // <-- not in MAME
+
+const int T1_COMB_BIT_TYPES = 4;
 
 /* dongle type #1: jumpers C and D assignments */
 #define MAKE_MAP(m0,m1,m2,m3,m4,m5,m6,m7)   \
@@ -65,9 +68,6 @@ typedef UINT32 offs_t;
     ((UINT32)(m5) << 15) | \
     ((UINT32)(m6) << 18) | \
     ((UINT32)(m7) << 21)
-
-
-#define T1MAP(x, m) (((m)>>(x*3))&7)
 
 enum {
     TYPE3_SWAP_01,
@@ -157,6 +157,7 @@ struct decocass_state
 {
     UINT8*     m_bin;
     UINT8*    m_prom;
+    UINT32      m_prom_mask;
     UINT8 (decocass_state::*m_dongle_r)(offs_t);
 
     INT32     m_firsttime;
@@ -179,6 +180,7 @@ struct decocass_state
     {
         m_bin = NULL;
         m_prom = NULL;
+        m_prom_mask = 0;
         m_firsttime = 0;
         m_latch1 = 0;
 
@@ -441,7 +443,6 @@ UINT8 decocass_state::decocass_type1_r(offs_t offset)
     }
     else
     {
-        offs_t promaddr;
         UINT8 save;
         UINT8 *prom = m_prom;//space.machine().root_device().memregion("dongle")->base();
 
@@ -449,7 +450,7 @@ UINT8 decocass_state::decocass_type1_r(offs_t offset)
         if (m_firsttime)
         {
             LOG(3,("prom data:\n"));
-            for (promaddr = 0; promaddr < 32; promaddr++)
+            for (int promaddr = 0; promaddr < 32; promaddr++)
             {
                 if (promaddr % 8 == 0)
                     LOG(3,("  %02x:", promaddr));
@@ -469,12 +470,16 @@ UINT8 decocass_state::decocass_type1_r(offs_t offset)
 
         save = data;    /* save the unmodifed data for the latch */
 
-        promaddr = 0;
+        offs_t promaddr = 0;
+        offs_t prommask = m_prom_mask;
         int promshift = 0;
 
+        // nb: m_type1_inmap and m_type1_outmap are both identity
+        #define T1MAP(x, m) (((m)>>(x*3))&7)
         for (int i=0;i<8;i++)
         {
-            if (m_type1_map[i] == T1PROM) { promaddr |= (((data >> T1MAP(i,m_type1_inmap)) & 1) << promshift); promshift++; }
+            //if (m_type1_map[i] == T1PROM) { promaddr |= (((data >> T1MAP(i,m_type1_inmap)) & 1) << promshift); promshift++; }
+            if (m_type1_map[i] == T1PROM || m_type1_map[i] == T1PROMINV) { promaddr |= (((data >> i) & 1) << promshift); promshift++; }
         }
 
         //if (promshift!=5)
@@ -483,13 +488,23 @@ UINT8 decocass_state::decocass_type1_r(offs_t offset)
         data = 0;
         promshift = 0;
 
+        // PROM, LATCHINV, PROM, DIRECT, PROM, PROM, LATCH, PROM
+
         for (int i=0;i<8;i++)
         {
-            if (m_type1_map[i] == T1PROM)     { data |= (((prom[promaddr] >> promshift) & 1)                << T1MAP(i,m_type1_outmap)); promshift++; }
-            if (m_type1_map[i] == T1LATCHINV) { data |= ((1 - ((m_latch1 >> T1MAP(i,m_type1_inmap)) & 1))   << T1MAP(i,m_type1_outmap)); }
-            if (m_type1_map[i] == T1LATCH)    { data |= (((m_latch1 >> T1MAP(i,m_type1_inmap)) & 1)         << T1MAP(i,m_type1_outmap)); }
-            if (m_type1_map[i] == T1DIRECT)   { data |= (((save >> T1MAP(i,m_type1_inmap)) & 1)             << T1MAP(i,m_type1_outmap)); }
-            if (m_type1_map[i] == T1DIRECTINV){ data |= ((1 - ((save >> T1MAP(i,m_type1_inmap)) & 1))       << T1MAP(i,m_type1_outmap)); }
+            //if (m_type1_map[i] == T1LATCHINV || m_type1_map[i] == T1LATCH) printf("offset %04x Using latch %02x\n", offset, m_latch1);
+
+            //if (m_type1_map[i] == T1PROM)     { data |= (((prom[promaddr] >> promshift) & 1)                << T1MAP(i,m_type1_outmap)); promshift++; }
+            //if (m_type1_map[i] == T1LATCHINV) { data |= ((1 - ((m_latch1 >> T1MAP(i,m_type1_inmap)) & 1))   << T1MAP(i,m_type1_outmap)); }
+            //if (m_type1_map[i] == T1LATCH)    { data |= (((m_latch1 >> T1MAP(i,m_type1_inmap)) & 1)         << T1MAP(i,m_type1_outmap)); }
+            //if (m_type1_map[i] == T1DIRECT)   { data |= (((save >> T1MAP(i,m_type1_inmap)) & 1)             << T1MAP(i,m_type1_outmap)); }
+            //if (m_type1_map[i] == T1DIRECTINV){ data |= ((1 - ((save >> T1MAP(i,m_type1_inmap)) & 1))       << T1MAP(i,m_type1_outmap)); }
+            if (m_type1_map[i] == T1PROM)     { data |= (((prom[promaddr&prommask] >> promshift) & 1)        << i); promshift++; }
+            if (m_type1_map[i] == T1PROMINV)  { data |= ((1 - ((prom[promaddr&prommask] >> promshift) & 1))  << i); promshift++; }
+            if (m_type1_map[i] == T1LATCHINV) { data |= ((1 - ((m_latch1 >> i) & 1))   << i); }
+            if (m_type1_map[i] == T1LATCH)    { data |= (((m_latch1 >> i) & 1)         << i); }
+            if (m_type1_map[i] == T1DIRECT)   { data |= (((save >> i) & 1)             << i); }
+            if (m_type1_map[i] == T1DIRECTINV){ data |= ((1 - ((save >> i) & 1))       << i); }
         }
 
         //LOG(3,("%10s 6502-PC: %04x decocass_type1_r(%02x): $%02x\n",
@@ -542,6 +557,7 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
     state.m_type = type;
     state.m_bin = bin_data;
     state.m_prom = prom_data;
+    state.m_prom_mask = prom_len-1; // assume power of two
     state.reset();
 
     bool found = false;
@@ -558,9 +574,22 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
         //{ T1PROM,T1PROM,T1LATCHINV,T1PROM,T1PROM,T1DIRECT,T1LATCH,T1PROM }; // Explorer
         //UINT8 known_map[8] = { T1PROM,T1LATCHINV,T1PROM,T1DIRECT,T1PROM,T1PROM,T1LATCH,T1PROM }; // Astro Fantasia DT-1074-C-0
         //UINT8 known_map[8] = { T1PROM,T1DIRECT,T1PROM,T1DIRECT,T1PROM,T1PROM,T1DIRECT,T1PROM }; // Ninja DT-1021-D-0
-        //UINT8 known_map[8] = { T1LATCHINV,T1PROM,T1PROM,T1DIRECT,T1PROM,T1PROM,T1LATCH,T1PROM }; // Treasure Island DT-1160-A-0
-        UINT8 known_map[8] = { T1LATCHINV,T1PROM,T1PROM,T1DIRECT,T1PROM,T1PROM,T1LATCH,T1PROM }; // Treasure Island DT-1160-B-0
-        //10110101
+        UINT8 known_map[8] = { T1LATCHINV,T1PROM,T1PROM,T1DIRECT,T1PROM,T1PROM,T1LATCH,T1PROM }; // Treasure Island DT-1160-A-0
+        //UINT8 known_map[8] = { T1LATCHINV,T1PROM,T1PROM,T1DIRECT,T1PROM,T1PROM,T1LATCH,T1PROM }; // Treasure Island DT-1160-A-0     // MOD
+        //UINT8 known_map[8] = { T1LATCHINV,T1PROM,T1PROM,T1DIRECT,T1PROM,T1PROM,T1LATCH,T1PROM }; // Treasure Island DT-1160-B-0
+        //UINT8 known_map[8] = { T1PROM, T1LATCHINV, T1PROM, T1DIRECT, T1PROM, T1PROM, T1LATCH, T1PROM }; // Astro Fantasia DT-1070-A-0
+
+
+        // treasure island
+        //  encrypted 
+        //    47 7D 57 66
+        //  decrypted (fail)
+        //    21 CC 42 54
+        // _HDR
+        //    ?? 48 44 52
+        // BC                 2E (.) ??   <- in date
+
+        // bit 1 
 
         memcpy(type1_map, known_map, sizeof(type1_map));
 
@@ -575,8 +604,8 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
         {
             for (int bit = 0; bit < 8; bit++)
             {
-                type1_map[bit] = comb_no % 4;
-                comb_no /= 4;
+                type1_map[bit] = comb_no % T1_COMB_BIT_TYPES;
+                comb_no /= T1_COMB_BIT_TYPES;
             }
         }
 
@@ -592,8 +621,8 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
 
     if (!found && type == DecoCaseType_1)
     {
-        int comb_count = 1024*64;
-        //int comb_count = (5*5*5*5)*(5*5*5*5);
+        //int comb_count = 1024*64;
+        int comb_count = (T1_COMB_BIT_TYPES*T1_COMB_BIT_TYPES*T1_COMB_BIT_TYPES*T1_COMB_BIT_TYPES)*(T1_COMB_BIT_TYPES*T1_COMB_BIT_TYPES*T1_COMB_BIT_TYPES*T1_COMB_BIT_TYPES);
 
         int comb_best_no = -1;
         int comb_best_score = -1;
@@ -685,7 +714,7 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
         printf("Found combination: ");
         for (int bit = 0; bit < 8; bit++)
         {
-            const char* names[] = { "DIRECT", "PROM", "LATCH", "LATCHINV", "DIRECTINV" };
+            const char* names[] = { "DIRECT", "PROM", "LATCH", "LATCHINV", "PROMINV", "DIRECTINV" };
             printf(bit < 7 ? "%s, " : "%s\n", names[type1_map[bit]]);
         }
 
@@ -717,9 +746,16 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
     for (int i = 0; i < bin_len; i++)
         bin_decoded[i] = (state.*state.m_dongle_r)(i);
 
+    if (type == DecoCaseType_1)
+    {
+        printf("\nInput PROM:\n");
+        DumpMemory(prom_data, prom_len);
+    }
+
     // Dump header for reference
     //printf("\nINPUT BIN:\n");
-    DumpMemory(bin_data, 256);
+    printf("\nInput Cassette:\n");
+    DumpMemory(bin_data, 128);
     printf("[...]\n");
 
     // Write
@@ -730,8 +766,16 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
         printf("Output: CRC32: %08X, %d bytes\n", Crc32(bin_decoded, bin_len), bin_len);
 
     //printf("\nOUTPUT BIN (DECODED):\n");
-    DumpMemory(bin_decoded, 256);
+    DumpMemory(bin_decoded, 128);
     printf("[...]\n");
+
+    // PROM, LATCHINV, PROM, DIRECT, PROM, PROM, LATCH, PROM
+
+    //   $02 : 0000.0010 --->      0        = $73 (latch = 0)
+    //         plpp dpip      plpp dpip
+    //   $48 : 0100.1000           1        = $7b (latch = $7b)
+    //         plpp dpip      plpp dpip
+
 
     return 0;
 }
