@@ -16,10 +16,11 @@
 // see machine/decocass.c, drivers/decocass.c, etc.
 // https://github.com/mamedev/mame/blob/bf4f1beaa2cd03b4362e52599ddcf4c4a9c32f13/src/mame/machine/decocass.c#L363
 
-#define VERSION     "v0.2 (2015/06/24)"
+#define VERSION     "v0.3 (2015/06/25)"
 
 // v0.1 - initial release (type 1 only, not much tested)
 // v0.2 - fixes, early support for type 3
+// v0.3 - additional type 1 dongle bit remapping maps
 
 //-------------------------------------
 // USAGE
@@ -82,6 +83,18 @@ enum {
     TYPE3_SWAP_56,
     TYPE3_SWAP_67,
     TYPE3_SWAP_COUNT
+};
+
+#define TYPE1_IO_MAPS_COUNT 6
+const UINT32 TYPE1_IO_MAPS[TYPE1_IO_MAPS_COUNT] =
+{
+    MAKE_MAP(0,1,2,3,4,5,6,7),
+    MAKE_MAP(0,1,2,3,5,4,6,7), // csuperas
+    MAKE_MAP(0,1,3,2,4,5,6,7), // clocknch
+    MAKE_MAP(1,0,2,3,4,5,6,7), // cprogolf, cprogolfj
+    MAKE_MAP(0,3,2,1,4,5,6,7), // cluckypo
+    MAKE_MAP(2,1,0,3,4,5,6,7), // ctisland
+
 };
 
 #define E5XX_MASK   0x02    /* use 0x0e for old style board */
@@ -150,14 +163,11 @@ static bool WriteFile(const char* filename, const u8* data, int len)
 
 #define LOG(unknown,args)        printf(args)
 
-//static UINT8 type1_latch_27_pass_3_inv_2_table[8] = { T1PROM,T1PROM,T1LATCHINV,T1DIRECT,T1PROM,T1PROM,T1PROM,T1LATCH };
-//static UINT8 type1_chwy[8] = { T1PROM,T1PROM,T1DIRECT,T1DIRECT,T1PROM,T1PROM,T1DIRECT,T1PROM };
-
 struct decocass_state
 {
     UINT8*     m_bin;
-    UINT8*    m_prom;
-    UINT32      m_prom_mask;
+    UINT8*     m_prom;
+    UINT32     m_prom_mask;
     UINT8 (decocass_state::*m_dongle_r)(offs_t);
 
     INT32     m_firsttime;
@@ -166,7 +176,7 @@ struct decocass_state
     DecoCaseType    m_type;
 
     /* dongle type #1 */
-    UINT8*    m_type1_map;
+    UINT8     m_type1_map[8];
     UINT32    m_type1_inmap;
     UINT32    m_type1_outmap;
 
@@ -186,7 +196,7 @@ struct decocass_state
 
         m_type = DecoCaseType_1;
 
-        m_type1_map = NULL;
+        //m_type1_map = NULL;
         m_type1_inmap = MAKE_MAP(0,1,2,3,4,5,6,7);
         m_type1_outmap = MAKE_MAP(0,1,2,3,4,5,6,7);
 
@@ -203,7 +213,7 @@ struct decocass_state
         case DecoCaseType_1:
             //LOG(0,("dongle type #1 (DE-0061 own PROM)\n"));
             m_dongle_r = &decocass_state::decocass_type1_r;
-            m_type1_map = NULL;//type1_chwy;//type1_latch_27_pass_3_inv_2_table;
+            //m_type1_map = NULL;//type1_chwy;//type1_latch_27_pass_3_inv_2_table;
             m_latch1 = 0;
             break;
         case DecoCaseType_3:
@@ -474,12 +484,10 @@ UINT8 decocass_state::decocass_type1_r(offs_t offset)
         offs_t prommask = m_prom_mask;
         int promshift = 0;
 
-        // nb: m_type1_inmap and m_type1_outmap are both identity
         #define T1MAP(x, m) (((m)>>(x*3))&7)
         for (int i=0;i<8;i++)
         {
-            //if (m_type1_map[i] == T1PROM) { promaddr |= (((data >> T1MAP(i,m_type1_inmap)) & 1) << promshift); promshift++; }
-            if (m_type1_map[i] == T1PROM || m_type1_map[i] == T1PROMINV) { promaddr |= (((data >> i) & 1) << promshift); promshift++; }
+            if (m_type1_map[i] == T1PROM || m_type1_map[i] == T1PROMINV) { promaddr |= (((data >> T1MAP(i,m_type1_inmap)) & 1) << promshift); promshift++; }
         }
 
         //if (promshift!=5)
@@ -492,19 +500,12 @@ UINT8 decocass_state::decocass_type1_r(offs_t offset)
 
         for (int i=0;i<8;i++)
         {
-            //if (m_type1_map[i] == T1LATCHINV || m_type1_map[i] == T1LATCH) printf("offset %04x Using latch %02x\n", offset, m_latch1);
-
-            //if (m_type1_map[i] == T1PROM)     { data |= (((prom[promaddr] >> promshift) & 1)                << T1MAP(i,m_type1_outmap)); promshift++; }
-            //if (m_type1_map[i] == T1LATCHINV) { data |= ((1 - ((m_latch1 >> T1MAP(i,m_type1_inmap)) & 1))   << T1MAP(i,m_type1_outmap)); }
-            //if (m_type1_map[i] == T1LATCH)    { data |= (((m_latch1 >> T1MAP(i,m_type1_inmap)) & 1)         << T1MAP(i,m_type1_outmap)); }
-            //if (m_type1_map[i] == T1DIRECT)   { data |= (((save >> T1MAP(i,m_type1_inmap)) & 1)             << T1MAP(i,m_type1_outmap)); }
-            //if (m_type1_map[i] == T1DIRECTINV){ data |= ((1 - ((save >> T1MAP(i,m_type1_inmap)) & 1))       << T1MAP(i,m_type1_outmap)); }
-            if (m_type1_map[i] == T1PROM)     { data |= (((prom[promaddr&prommask] >> promshift) & 1)        << i); promshift++; }
-            if (m_type1_map[i] == T1PROMINV)  { data |= ((1 - ((prom[promaddr&prommask] >> promshift) & 1))  << i); promshift++; }
-            if (m_type1_map[i] == T1LATCHINV) { data |= ((1 - ((m_latch1 >> i) & 1))   << i); }
-            if (m_type1_map[i] == T1LATCH)    { data |= (((m_latch1 >> i) & 1)         << i); }
-            if (m_type1_map[i] == T1DIRECT)   { data |= (((save >> i) & 1)             << i); }
-            if (m_type1_map[i] == T1DIRECTINV){ data |= ((1 - ((save >> i) & 1))       << i); }
+            if (m_type1_map[i] == T1PROM)     { data |= (((prom[promaddr] >> promshift) & 1)                << T1MAP(i,m_type1_outmap)); promshift++; }
+            if (m_type1_map[i] == T1PROMINV)  { data |= ((1 - ((prom[promaddr] >> promshift) & 1))          << T1MAP(i,m_type1_outmap)); promshift++; }
+            if (m_type1_map[i] == T1LATCHINV) { data |= ((1 - ((m_latch1 >> T1MAP(i,m_type1_inmap)) & 1))   << T1MAP(i,m_type1_outmap)); }
+            if (m_type1_map[i] == T1LATCH)    { data |= (((m_latch1 >> T1MAP(i,m_type1_inmap)) & 1)         << T1MAP(i,m_type1_outmap)); }
+            if (m_type1_map[i] == T1DIRECT)   { data |= (((save >> T1MAP(i,m_type1_inmap)) & 1)             << T1MAP(i,m_type1_outmap)); }
+            if (m_type1_map[i] == T1DIRECTINV){ data |= ((1 - ((save >> T1MAP(i,m_type1_inmap)) & 1))       << T1MAP(i,m_type1_outmap)); }
         }
 
         //LOG(3,("%10s 6502-PC: %04x decocass_type1_r(%02x): $%02x\n",
@@ -567,7 +568,6 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
     // we HAVE the information in the text file but it's been stored in an awkward way
     // rather than parsing it I am trying all 4^8 = 64K combinations..
 
-    UINT8 type1_map[8];
     if (0)
     {
         //{ T1PROM, T1PROM, T1LATCHINV, T1PROM, T1PROM, T1DIRECT, T1LATCH, T1PROM };
@@ -579,41 +579,31 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
         //UINT8 known_map[8] = { T1LATCHINV,T1PROM,T1PROM,T1DIRECT,T1PROM,T1PROM,T1LATCH,T1PROM }; // Treasure Island DT-1160-B-0
         //UINT8 known_map[8] = { T1PROM, T1LATCHINV, T1PROM, T1DIRECT, T1PROM, T1PROM, T1LATCH, T1PROM }; // Astro Fantasia DT-1070-A-0
 
-
-        // treasure island
-        //  encrypted 
-        //    47 7D 57 66
-        //  decrypted (fail)
-        //    21 CC 42 54
-        // _HDR
-        //    ?? 48 44 52
-        // BC                 2E (.) ??   <- in date
-
-        // bit 1 
-
-        memcpy(type1_map, known_map, sizeof(type1_map));
-
         state.reset();
-        state.m_type1_map = type1_map;
+        memcpy(state.m_type1_map, known_map, sizeof(known_map));
         found = true;
     }
 
     struct f
     {
-        static void WriteMask(UINT8 type1_map[8], unsigned int comb_no)
+        static void SetupComb(decocass_state& state, unsigned int comb_no)
         {
+            state.m_type1_inmap = TYPE1_IO_MAPS[comb_no % TYPE1_IO_MAPS_COUNT];
+            state.m_type1_outmap = TYPE1_IO_MAPS[comb_no % TYPE1_IO_MAPS_COUNT];
+            comb_no /= TYPE1_IO_MAPS_COUNT;
+
             for (int bit = 0; bit < 8; bit++)
             {
-                type1_map[bit] = comb_no % T1_COMB_BIT_TYPES;
+                state.m_type1_map[bit] = comb_no % T1_COMB_BIT_TYPES;
                 comb_no /= T1_COMB_BIT_TYPES;
             }
         }
 
-        static UINT8 GetMaskForType(UINT8 type1_map[8], UINT8 type)
+        static UINT8 GetMaskForType(decocass_state& state, UINT8 type)
         {
             UINT8 mask = 0;
             for (int bit = 0; bit < 8; bit++)
-                if (type1_map[bit] == type)
+                if (state.m_type1_map[bit] == type)
                     mask |= 1 << bit;
             return mask;
         }
@@ -623,6 +613,7 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
     {
         //int comb_count = 1024*64;
         int comb_count = (T1_COMB_BIT_TYPES*T1_COMB_BIT_TYPES*T1_COMB_BIT_TYPES*T1_COMB_BIT_TYPES)*(T1_COMB_BIT_TYPES*T1_COMB_BIT_TYPES*T1_COMB_BIT_TYPES*T1_COMB_BIT_TYPES);
+        comb_count *= TYPE1_IO_MAPS_COUNT;
 
         int comb_best_no = -1;
         int comb_best_score = -1;
@@ -630,10 +621,9 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
         printf("Bruteforce bit mapping looking for 'HDR' string (%d combinations)...\n", comb_count);
         for (int comb_no = 0; comb_no < comb_count; comb_no++)
         {
-            f::WriteMask(type1_map, comb_no);
-
             state.reset();
-            state.m_type1_map = type1_map;
+            f::SetupComb(state, comb_no);
+
             UINT8 hdr[64];
             for (int i = 0; i < 5; i++)
                 hdr[i] = (state.*state.m_dongle_r)(i);
@@ -657,7 +647,7 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
             }
         }
         if (found)
-            f::WriteMask(type1_map, comb_best_no);
+            f::SetupComb(state, comb_best_no);
         if (!found)
         {
             printf("Error: couldn't find a suitable bit mapping.\n");
@@ -715,15 +705,24 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
         for (int bit = 0; bit < 8; bit++)
         {
             const char* names[] = { "DIRECT", "PROM", "LATCH", "LATCHINV", "PROMINV", "DIRECTINV" };
-            printf(bit < 7 ? "%s, " : "%s\n", names[type1_map[bit]]);
+            printf(bit < 7 ? "%s, " : "%s\n", names[state.m_type1_map[bit]]);
         }
 
-        printf("Latched bits                          = $%02X\n", f::GetMaskForType(type1_map, T1LATCH) | f::GetMaskForType(type1_map, T1LATCHINV));
-        printf("Latched bits uninverted               = $%02X\n", f::GetMaskForType(type1_map, T1LATCH));
-        printf("Latched bits inverted                 = $%02X\n", f::GetMaskForType(type1_map, T1LATCHINV));
-        printf("Input bits that are passed uninverted = $%02X\n", f::GetMaskForType(type1_map, T1DIRECT));
+        printf("Latched bits                          = $%02X\n", f::GetMaskForType(state, T1LATCH) | f::GetMaskForType(state, T1LATCHINV));
+        printf("Latched bits uninverted               = $%02X\n", f::GetMaskForType(state, T1LATCH));
+        printf("Latched bits inverted                 = $%02X\n", f::GetMaskForType(state, T1LATCHINV));
+        printf("Input bits that are passed uninverted = $%02X\n", f::GetMaskForType(state, T1DIRECT));
         printf("Input bits that are passed inverted   = $00\n");
-        printf("Remaining bits for addressing PROM    = $%02X\n", f::GetMaskForType(type1_map, T1PROM));
+        printf("Remaining bits for addressing PROM    = $%02X\n", f::GetMaskForType(state, T1PROM));
+
+        printf("Input map                             = (");
+        for (int bit = 0; bit < 8; bit++)
+            printf(bit < 7 ? "%d, " : "%d", (state.m_type1_inmap >> (bit*3)) & 7);
+        printf(")\n");
+        printf("Output map                            = (");
+        for (int bit = 0; bit < 8; bit++)
+            printf(bit < 7 ? "%d, " : "%d", (state.m_type1_outmap >> (bit*3)) & 7);
+        printf(")\n");
     }
 
     /*
