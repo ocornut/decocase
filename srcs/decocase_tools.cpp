@@ -16,11 +16,12 @@
 // see machine/decocass.c, drivers/decocass.c, etc.
 // https://github.com/mamedev/mame/blob/bf4f1beaa2cd03b4362e52599ddcf4c4a9c32f13/src/mame/machine/decocass.c#L363
 
-#define VERSION     "v0.3 (2015/06/25)"
+#define VERSION     "v0.4x (2015/06/25)"
 
 // v0.1 - initial release (type 1 only, not much tested)
 // v0.2 - fixes, early support for type 3
 // v0.3 - additional type 1 dongle bit remapping maps, more brute force options
+// v0.4x - encrypt type 1 + find correct decryption setting for type 1 based on encryption match
 
 //-------------------------------------
 // USAGE
@@ -133,7 +134,6 @@ static bool ReadFile(const char* filename, const char* mode, u8** out_data, int*
         printf("Error: failed to open '%s', aborting.\n", filename);
         return false;
     }
-
     fseek(f, 0, SEEK_END);
     int len = (int)ftell(f);
     fseek(f, 0, SEEK_SET);
@@ -229,6 +229,8 @@ struct decocass_state
 
     UINT8 decocass_type1_r(offs_t offset);
     UINT8 decocass_type3_r(offs_t offset);
+
+    bool decocass_type1_encrypt(const UINT8* bin_src_decoded, UINT8* bin_dst_encoded, const UINT8* bin_ref_encoded, int bin_len);
 };
 
 UINT8 decocass_state::decocass_type3_r(offs_t offset)
@@ -421,6 +423,49 @@ UINT8 decocass_state::decocass_type1_r(offs_t offset)
     return data;
 }
 
+bool decocass_state::decocass_type1_encrypt(const UINT8* bin_src_decoded, UINT8* bin_dst_encoded, const UINT8* bin_ref_encoded, int bin_len)
+{
+    UINT8 prom_lut[32];
+    memset(prom_lut, -1, 32);
+    for (int i = 0; i < 32; i++)
+        prom_lut[m_prom[i] & 0x1f] = i;
+
+    UINT8 latch = 0;
+
+    for (int addr = 0; addr < bin_len; addr++)
+    {
+        UINT8 src = bin_src_decoded[addr];
+        UINT8 src_next = (addr+1 < bin_len) ? bin_src_decoded[addr+1] : 0x00; // FIXME: final byte undefined
+        UINT8 dst = 0;
+
+        offs_t promval = 0;
+        int promshift = 0;
+        for (int i=0;i<8;i++)
+        {
+            if (m_type1_map[i] == T1PROM)   { promval |= (((src >> T1MAP(i,m_type1_outmap))) & 1) << promshift; promshift++; }
+        }
+        //printf("%04x: promval: %02x @ lut %02x\n", addr, promval, prom_lut[promval]);
+
+        promshift = 0;
+        for (int i=0;i<8;i++)
+        {
+            if (m_type1_map[i] == T1PROM)     { dst |= (((prom_lut[promval] >> promshift) & 1))             << T1MAP(i,m_type1_inmap); promshift++; }
+            if (m_type1_map[i] == T1DIRECT)   { dst |= ((src >> T1MAP(i,m_type1_outmap)) & 1)               << T1MAP(i,m_type1_inmap); }
+            if (m_type1_map[i] == T1LATCHINV) { dst |= ((1 - (src_next >> T1MAP(i,m_type1_outmap)) & 1))    << T1MAP(i,m_type1_inmap); }
+            if (m_type1_map[i] == T1LATCH)    { dst |= ((src_next>> T1MAP(i,m_type1_outmap)) & 1)           << T1MAP(i,m_type1_inmap); } 
+        }
+
+        bin_dst_encoded[addr] = dst;
+        latch = dst;
+
+        // re-encode mismatch
+        if (bin_ref_encoded && bin_ref_encoded[addr] != dst)
+            return false;
+    }
+
+    return true;
+}
+
 void DumpMemory(const u8* data, int len, int columns = 16, int addr_offset = 0)
 {
     for (int i = 0; i < len; i += columns)
@@ -457,6 +502,9 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
     int prom_len;
     if (!ReadFile(argv[arg++], "rb", &prom_data, &prom_len))
         return 1;
+
+    u8* bin_recoded = new u8[bin_len];
+    memset(bin_recoded, 0, bin_len * sizeof(u8));
 
     decocass_state state;
     state.m_type = type;
@@ -515,7 +563,6 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
         CrackFlags_InOutOneSwapSeparateInOut = 1 << 3,  // 8*4 = 64*64 = 4096
         CrackFlags_Map4                      = 1 << 4,  // 4^8 = 65536
         CrackFlags_Map6                      = 1 << 5,  // 6^8 = 1679616 (two extra settings not in mame, may no exist)
-
         CrackFlags_DisplayNewBestScore       = 1 << 6,
     };
 
@@ -598,9 +645,9 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
     if (!found && type == DecoCaseType_1)
     {
         int flags = 0;
-        //flags |= CrackFlags_InOutList;
+        flags |= CrackFlags_InOutList;
         //flags |= CrackFlags_InOutAll;
-        flags |= CrackFlags_InOutOneSwap;             
+        //flags |= CrackFlags_InOutOneSwap;             
         //flags |= CrackFlags_InOutOneSwapSeparateInOut;
         flags |= CrackFlags_Map4;                      
         //flags |= CrackFlags_Map6;                      
@@ -622,7 +669,7 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
         unsigned long long comb_best_no = -1;
         int comb_best_score = -1;
 
-        printf("Bruteforce bit mapping looking for 'HDR' string (%lld combinations)...\n", comb_count);
+        printf("Brute force bit mapping looking for 'HDR' string (%lld combinations)...\n", comb_count);
         for (unsigned long long comb_no = 0; comb_no < comb_count; comb_no++)
         {
             if (comb_count > 5000000)
@@ -652,13 +699,15 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
                 for (int i = 32; i < 96; i++)
                     score += (hdr[i] == ' ') ? 1 : 0; 
 
-                if (comb_best_score < score)
+                bool reencode_ok = state.decocass_type1_encrypt(hdr, bin_recoded, bin_data, 96);
+                if (!reencode_ok)
+                    continue;
+
+                if (comb_best_score <= score)
                 {
-                    if (flags & CrackFlags_DisplayNewBestScore)
-                    {
-                        printf("new best score %d\n", score);
-                        DumpMemory(hdr, 96, 16);
-                    }
+                    //printf("new best score %d\n", score);
+                    //if (flags & CrackFlags_DisplayNewBestScore)
+                      //  DumpMemory(hdr, 96, 16);
                     comb_best_score = score;
                     comb_best_no = comb_no;
                 }
@@ -666,7 +715,11 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
             }
         }
         if (found)
+        {
+            state.reset();
             f::SetupComb(state, comb_best_no, flags);
+        }
+
         if (!found)
         {
             printf("Error: couldn't find a suitable bit mapping.\n");
@@ -753,13 +806,23 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
     {
         printf("\nInput PROM:\n");
         DumpMemory(prom_data, prom_len <= 256 ? prom_len : 256);
+
+        unsigned int prom_cover = 0x00;
+        for (int i = 0; i < 32; i++)
+        {
+            UINT8 d = state.m_prom[i];
+            prom_cover |= (1 << (d & 0x1f));
+            //printf("PROM[$%02x] = $%02x masked $%02x / (%d%d%d) %d%d%d%d%d\n", i, d, d&0x1f, (d>>7)&1, (d>>6)&1, (d>>5)&1, (d>>4)&1, (d>>3)&1, (d>>2)&1, (d>>1)&1, (d>>0)&1);
+        }
+        printf("PROM type1 bit coverage $%08X: %s\n", prom_cover, prom_cover == 0xffffffff ? "OK" : "Error");
+
         if (prom_len > 256)
             printf("[...]\n");
     }
 
     // Dump header for reference
     //printf("\nINPUT BIN:\n");
-    printf("\nInput Cassette:\n");
+    printf("\nInput Cassette: CRC32: %08X, %d bytes\n", Crc32(bin_data, bin_len), bin_len);
     DumpMemory(bin_data, 128);
     printf("[...]\n");
 
@@ -774,12 +837,15 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
     DumpMemory(bin_decoded, 128);
     printf("[...]\n");
 
-    // PROM, LATCHINV, PROM, DIRECT, PROM, PROM, LATCH, PROM
-
-    //   $02 : 0000.0010 --->      0        = $73 (latch = 0)
-    //         plpp dpip      plpp dpip
-    //   $48 : 0100.1000           1        = $7b (latch = $7b)
-    //         plpp dpip      plpp dpip
+    // Re-encrypt with same key
+    if (type == DecoCaseType_1)
+    {
+        state.decocass_type1_encrypt(bin_decoded, bin_recoded, NULL, bin_len);
+        printf("\nReencrypted: CRC32: %08X, %d bytes\n", Crc32(bin_recoded, bin_len), bin_len);
+        if (memcmp(bin_data, bin_recoded, bin_len) != 0)
+            printf("Error: Reencryption mismatch!\n");
+        DumpMemory(bin_recoded, 128);//bin_len);
+    }
 
     return 0;
 }
