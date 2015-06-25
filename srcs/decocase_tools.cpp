@@ -20,7 +20,7 @@
 
 // v0.1 - initial release (type 1 only, not much tested)
 // v0.2 - fixes, early support for type 3
-// v0.3 - additional type 1 dongle bit remapping maps
+// v0.3 - additional type 1 dongle bit remapping maps, more brute force options
 
 //-------------------------------------
 // USAGE
@@ -57,7 +57,7 @@ typedef UINT32 offs_t;
 #define T1PROMINV 4 // <-- not in MAME
 #define T1DIRECTINV 5 // <-- not in MAME
 
-const int T1_COMB_BIT_TYPES = 4;
+//const int T1_COMB_BIT_TYPES = 4+2;
 
 /* dongle type #1: jumpers C and D assignments */
 #define MAKE_MAP(m0,m1,m2,m3,m4,m5,m6,m7)   \
@@ -85,7 +85,7 @@ enum {
     TYPE3_SWAP_COUNT
 };
 
-#define TYPE1_IO_MAPS_COUNT 6
+#define TYPE1_IO_MAPS_COUNT 7
 const UINT32 TYPE1_IO_MAPS[TYPE1_IO_MAPS_COUNT] =
 {
     MAKE_MAP(0,1,2,3,4,5,6,7),
@@ -94,6 +94,8 @@ const UINT32 TYPE1_IO_MAPS[TYPE1_IO_MAPS_COUNT] =
     MAKE_MAP(1,0,2,3,4,5,6,7), // cprogolf, cprogolfj
     MAKE_MAP(0,3,2,1,4,5,6,7), // cluckypo
     MAKE_MAP(2,1,0,3,4,5,6,7), // ctisland
+
+    MAKE_MAP(0,1,2,4,3,5,6,7), // explorer
 
 };
 
@@ -571,32 +573,114 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
     if (0)
     {
         //{ T1PROM, T1PROM, T1LATCHINV, T1PROM, T1PROM, T1DIRECT, T1LATCH, T1PROM };
-        //{ T1PROM,T1PROM,T1LATCHINV,T1PROM,T1PROM,T1DIRECT,T1LATCH,T1PROM }; // Explorer
         //UINT8 known_map[8] = { T1PROM,T1LATCHINV,T1PROM,T1DIRECT,T1PROM,T1PROM,T1LATCH,T1PROM }; // Astro Fantasia DT-1074-C-0
         //UINT8 known_map[8] = { T1PROM,T1DIRECT,T1PROM,T1DIRECT,T1PROM,T1PROM,T1DIRECT,T1PROM }; // Ninja DT-1021-D-0
-        UINT8 known_map[8] = { T1LATCHINV,T1PROM,T1PROM,T1DIRECT,T1PROM,T1PROM,T1LATCH,T1PROM }; // Treasure Island DT-1160-A-0
+        //UINT8 known_map[8] = { T1LATCHINV,T1PROM,T1PROM,T1DIRECT,T1PROM,T1PROM,T1LATCH,T1PROM }; // Treasure Island DT-1160-A-0
         //UINT8 known_map[8] = { T1LATCHINV,T1PROM,T1PROM,T1DIRECT,T1PROM,T1PROM,T1LATCH,T1PROM }; // Treasure Island DT-1160-A-0     // MOD
         //UINT8 known_map[8] = { T1LATCHINV,T1PROM,T1PROM,T1DIRECT,T1PROM,T1PROM,T1LATCH,T1PROM }; // Treasure Island DT-1160-B-0
         //UINT8 known_map[8] = { T1PROM, T1LATCHINV, T1PROM, T1DIRECT, T1PROM, T1PROM, T1LATCH, T1PROM }; // Astro Fantasia DT-1070-A-0
+        
+
+        //UINT8 known_map[8] = { T1PROM,T1PROM,T1LATCHINV,T1PROM,T1PROM,T1DIRECT,T1LATCH,T1PROM }; // Explorer DT-1180-A-0
+        //UINT8 known_map[8] = { T1PROM,T1PROM,T1LATCHINV,T1DIRECT,T1PROM,T1PROM,T1LATCH,T1PROM }; // Explorer DT-2181-A-S
+
+        //UINT8 known_map[8] = { T1PROM, T1DIRECT, T1PROM, T1PROM, T1DIRECT, T1PROM, T1DIRECT, T1PROM }; //  (0, 1, 2, 4, 3, 5, 6, 7) // 00-System DT-1902-B-0
+        //UINT8 known_map[8] = { T1PROM,T1DIRECT,T1PROM,T1DIRECT,T1PROM,T1PROM,T1DIRECT,T1PROM };
+        UINT8 known_map[8] = { T1PROM,T1PROM,T1LATCH,T1DIRECT,T1PROM,T1PROM,T1PROM,T1LATCH }; // 00-System DT-1914-B-0
 
         state.reset();
         memcpy(state.m_type1_map, known_map, sizeof(known_map));
-        found = true;
+        found = false;
+
+        //state.m_type1_inmap = state.m_type1_outmap = MAKE_MAP(2,1,0,3,4,5,6,7);
     }
+
+    // explorer encoded
+    //  5D 43 5D 4F
+
+    // explorer out (fail)
+    //  04 50 44 41 - 1010000, 1000100, 01000001
+
+    // _HDR
+    //  ?? 48 44 52 - 1001000, 1000100, 01010010
+    //                  xx                 x  x
+
+    enum CrackFlags
+    {
+        CrackFlags_InOutList                 = 1 << 0,  // <10
+        CrackFlags_InOutAll                  = 1 << 1,  // 8^8 = 16777216
+        CrackFlags_InOutOneSwap              = 1 << 2,  // 8*2 = 64
+        CrackFlags_InOutOneSwapSeparateInOut = 1 << 3,  // 8*4 = 64*64 = 4096
+        CrackFlags_Map4                      = 1 << 4,  // 4^8 = 65536
+        CrackFlags_Map6                      = 1 << 5,  // 6^8 = 1679616 (two extra settings not in mame, may no exist)
+
+        CrackFlags_DisplayNewBestScore       = 1 << 6,
+    };
 
     struct f
     {
-        static void SetupComb(decocass_state& state, unsigned int comb_no)
+        static void SetupComb(decocass_state& state, unsigned long long comb_no, int flags)
         {
-            state.m_type1_inmap = TYPE1_IO_MAPS[comb_no % TYPE1_IO_MAPS_COUNT];
-            state.m_type1_outmap = TYPE1_IO_MAPS[comb_no % TYPE1_IO_MAPS_COUNT];
-            comb_no /= TYPE1_IO_MAPS_COUNT;
-
-            for (int bit = 0; bit < 8; bit++)
+            // in/out mame combinations
+            if (flags & CrackFlags_InOutList)
             {
-                state.m_type1_map[bit] = comb_no % T1_COMB_BIT_TYPES;
-                comb_no /= T1_COMB_BIT_TYPES;
+                state.m_type1_inmap = TYPE1_IO_MAPS[comb_no % TYPE1_IO_MAPS_COUNT];
+                //comb_no /= TYPE1_IO_MAPS_COUNT;
+                state.m_type1_outmap = TYPE1_IO_MAPS[comb_no % TYPE1_IO_MAPS_COUNT];
+                comb_no /= TYPE1_IO_MAPS_COUNT;
             }
+            
+            // in/out all combination
+            if (flags & CrackFlags_InOutAll)
+            {
+                state.m_type1_inmap = state.m_type1_outmap = MAKE_MAP(comb_no&7, (comb_no>>3)&7, (comb_no>>6)&7, (comb_no>>9)&7, (comb_no>>12)&7, (comb_no>>15)&7, (comb_no>>18)&7, (comb_no>>21)&7);
+                comb_no /= 8*8*8*8*8*8*8*8;
+            }
+
+            // in/out 8*8 (swap two bits)
+            if ((flags & CrackFlags_InOutOneSwap) || (flags & CrackFlags_InOutOneSwapSeparateInOut))
+            {
+                int o[8] = { 0,1,2,3,4,5,6,7 };
+                int b0 = comb_no & 7; comb_no /= 8;
+                int b1 = comb_no & 7; comb_no /= 8;
+                int tmp = o[b0];
+                o[b0] = o[b1];
+                o[b1] = tmp;
+                state.m_type1_inmap = MAKE_MAP(o[0],o[1],o[2],o[3],o[4],o[5],o[6],o[7]);
+
+                if (flags & CrackFlags_InOutOneSwapSeparateInOut)
+                {
+                    int o[8] = { 0,1,2,3,4,5,6,7 };
+                    int b0 = comb_no & 7; comb_no /= 8;
+                    int b1 = comb_no & 7; comb_no /= 8;
+                    int tmp = o[b0];
+                    o[b0] = o[b1];
+                    o[b1] = tmp;
+                    state.m_type1_outmap = MAKE_MAP(o[0],o[1],o[2],o[3],o[4],o[5],o[6],o[7]);
+                }
+                else
+                {
+                    state.m_type1_outmap = state.m_type1_inmap;
+                }
+            }
+
+            if (flags & CrackFlags_Map4)
+            {
+                for (int bit = 0; bit < 8; bit++)
+                {
+                    state.m_type1_map[bit] = comb_no % 4;
+                    comb_no /= 4;
+                }
+            }
+            if (flags & CrackFlags_Map6)
+            {
+                for (int bit = 0; bit < 8; bit++)
+                {
+                    state.m_type1_map[bit] = comb_no % 6;
+                    comb_no /= 6;
+                }
+            }
+
         }
 
         static UINT8 GetMaskForType(decocass_state& state, UINT8 type)
@@ -611,35 +695,68 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
 
     if (!found && type == DecoCaseType_1)
     {
-        //int comb_count = 1024*64;
-        int comb_count = (T1_COMB_BIT_TYPES*T1_COMB_BIT_TYPES*T1_COMB_BIT_TYPES*T1_COMB_BIT_TYPES)*(T1_COMB_BIT_TYPES*T1_COMB_BIT_TYPES*T1_COMB_BIT_TYPES*T1_COMB_BIT_TYPES);
-        comb_count *= TYPE1_IO_MAPS_COUNT;
+        int flags = 0;
+        //flags |= CrackFlags_InOutList;
+        //flags |= CrackFlags_InOutAll;
+        flags |= CrackFlags_InOutOneSwap;             
+        //flags |= CrackFlags_InOutOneSwapSeparateInOut;
+        flags |= CrackFlags_Map4;                      
+        //flags |= CrackFlags_Map6;                      
 
-        int comb_best_no = -1;
+        unsigned long long comb_count = 1;
+        if (flags & CrackFlags_InOutList)
+            comb_count *= TYPE1_IO_MAPS_COUNT;
+        if (flags & CrackFlags_InOutAll)
+            comb_count *= 8*8*8*8*8*8*8*8; // 8*7*6*5*4*3*2*1;
+        if (flags & CrackFlags_InOutOneSwapSeparateInOut)
+            comb_count *= 8*8*8*8;
+        else if (flags & CrackFlags_InOutOneSwap)
+            comb_count *= 8*8;
+        if (flags & CrackFlags_Map4)
+            comb_count *= (4*4*4*4)*(4*4*4*4);
+        else if (flags & CrackFlags_Map6)
+            comb_count *= (6*6*6*6)*(6*6*6*6);
+        
+        unsigned long long comb_best_no = -1;
         int comb_best_score = -1;
 
-        printf("Bruteforce bit mapping looking for 'HDR' string (%d combinations)...\n", comb_count);
-        for (int comb_no = 0; comb_no < comb_count; comb_no++)
+        printf("Bruteforce bit mapping looking for 'HDR' string (%lld combinations)...\n", comb_count);
+        for (unsigned long long comb_no = 0; comb_no < comb_count; comb_no++)
         {
-            state.reset();
-            f::SetupComb(state, comb_no);
+            if (comb_count > 5000000)
+                if ((comb_no % 1000000) == 0)
+                    printf("%lld/%lld...\n", comb_no, comb_count);
 
-            UINT8 hdr[64];
+            state.reset();
+            f::SetupComb(state, comb_no, flags);
+
+            UINT8 hdr[96];
             for (int i = 0; i < 5; i++)
                 hdr[i] = (state.*state.m_dongle_r)(i);
 
-            if (memcmp(hdr+1, "HDRA", 4) == 0 || memcmp(hdr+1, "HDRB", 4) == 0 || memcmp(hdr+1, "HDRC", 4) == 0 || memcmp(hdr+1, "HDRD", 4) == 0)
+            //if (memcmp(hdr+1, "HDRA", 4) == 0 || memcmp(hdr+1, "HDRB", 4) == 0 || memcmp(hdr+1, "HDRC", 4) == 0 || memcmp(hdr+1, "HDRD", 4) == 0)
+            if (memcmp(hdr+1, "HDR", 3) == 0)
+            //if (memcmp(hdr+7, "DEC", 3) == 0)
             {
                 found = true;
-                for (int i = 5; i < 64; i++)
+                for (int i = 5; i < 96; i++)
                     hdr[i] = (state.*state.m_dongle_r)(i);
 
                 int score = 0;
-                for (int i = 0; i < 64; i++)
-                    score += isalnum(hdr[i]) ? 1 : 0; 
+                for (int i = 0; i < 16; i++)
+                    score += isalnum(hdr[i]) ? 2 : 0; 
+                for (int i = 16; i < 32; i++)
+                    score += isdigit(hdr[i]) ? 2 : 0; 
+                for (int i = 32; i < 96; i++)
+                    score += (hdr[i] == ' ') ? 1 : 0; 
+
                 if (comb_best_score < score)
                 {
-                    //printf("new best score %d\n", score);
+                    if (flags & CrackFlags_DisplayNewBestScore)
+                    {
+                        printf("new best score %d\n", score);
+                        DumpMemory(hdr, 96, 16);
+                    }
                     comb_best_score = score;
                     comb_best_no = comb_no;
                 }
@@ -647,7 +764,7 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
             }
         }
         if (found)
-            f::SetupComb(state, comb_best_no);
+            f::SetupComb(state, comb_best_no, flags);
         if (!found)
         {
             printf("Error: couldn't find a suitable bit mapping.\n");
@@ -748,7 +865,9 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
     if (type == DecoCaseType_1)
     {
         printf("\nInput PROM:\n");
-        DumpMemory(prom_data, prom_len);
+        DumpMemory(prom_data, prom_len <= 256 ? prom_len : 256);
+        if (prom_len > 256)
+            printf("[...]\n");
     }
 
     // Dump header for reference
