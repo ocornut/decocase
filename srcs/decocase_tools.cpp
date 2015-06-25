@@ -490,7 +490,10 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
 
     u8* bin_data;
     int bin_len;
-    if (!ReadFile(argv[arg++], "rb", &bin_data, &bin_len))
+    const char* bin_name = argv[arg++];
+    if (const char* p = strrchr(bin_name, '/')) bin_name = p+1;
+    else if (const char* p = strrchr(bin_name, '\\')) bin_name = p+1;
+    if (!ReadFile(bin_name, "rb", &bin_data, &bin_len))
         return 1;
 
     //u8* txt_data;
@@ -500,7 +503,10 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
 
     u8* prom_data;
     int prom_len;
-    if (!ReadFile(argv[arg++], "rb", &prom_data, &prom_len))
+    const char* prom_name = argv[arg++];
+    if (const char* p = strrchr(prom_name, '/')) prom_name = p+1;
+    else if (const char* p = strrchr(prom_name, '\\')) prom_name = p+1;
+    if (!ReadFile(prom_name, "rb", &prom_data, &prom_len))
         return 1;
 
     u8* bin_recoded = new u8[bin_len];
@@ -669,7 +675,8 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
         unsigned long long comb_best_no = -1;
         int comb_best_score = -1;
 
-        printf("Brute force bit mapping looking for 'HDR' string (%lld combinations)...\n", comb_count);
+        printf("\n");
+        printf("Searching %lld combinations...\n", comb_count);
         for (unsigned long long comb_no = 0; comb_no < comb_count; comb_no++)
         {
             if (comb_count > 5000000)
@@ -728,15 +735,15 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
     }
     if (!found && type == DecoCaseType_3)
     {
-        int comb_count = TYPE3_SWAP_COUNT;
-        int comb_best_no = -1;
+        unsigned long long comb_count = TYPE3_SWAP_COUNT;
+        unsigned long long comb_best_no = -1;
         int comb_best_score = -1;
 
-        printf("Bruteforce bit swap mode looking for 'HDR' string (%d combinations)...\n", comb_count);
-        for (int comb_no = 0; comb_no < comb_count; comb_no++)
+        printf("Searching %lld combinations...\n", comb_count);
+        for (unsigned long long comb_no = 0; comb_no < comb_count; comb_no++)
         {
             state.reset();
-            state.m_type3_swap = comb_no;
+            state.m_type3_swap = (INT32)comb_no;
 
             UINT8 hdr[64];
             for (int i = 0; i < 5; i++)
@@ -766,19 +773,25 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
             return 1;
         }
         state.reset();
-        state.m_type3_swap = comb_best_no;
+        state.m_type3_swap = (INT32)comb_best_no;
 
         printf("Using swap mode: %d\n", state.m_type3_swap);
     }
 
     if (type == DecoCaseType_1)
     {
-        printf("Found combination: ");
+        printf("------------------------------------------------\n");
+        printf("Type1 cas '%s' (CRC %08X) prom '%s' (CRC %08X)\ndongle (", bin_name, Crc32(bin_data, bin_len), prom_name, Crc32(prom_data, prom_len));
         for (int bit = 0; bit < 8; bit++)
         {
             const char* names[] = { "DIRECT", "PROM", "LATCH", "LATCHINV", "PROMINV", "DIRECTINV" };
-            printf(bit < 7 ? "%s, " : "%s\n", names[state.m_type1_map[bit]]);
+            printf(bit < 7 ? "%s," : "%s", names[state.m_type1_map[bit]]);
         }
+        printf(") remap (");
+        for (int bit = 0; bit < 8; bit++)
+            printf(bit < 7 ? "%d," : "%d", (state.m_type1_inmap >> (bit*3)) & 7);
+        printf(")\n");
+        printf("------------------------------------------------\n");
 
         printf("Latched bits                          = $%02X\n", f::GetMaskForType(state, T1LATCH) | f::GetMaskForType(state, T1LATCHINV));
         printf("Latched bits uninverted               = $%02X\n", f::GetMaskForType(state, T1LATCH));
@@ -789,11 +802,11 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
 
         printf("Input map                             = (");
         for (int bit = 0; bit < 8; bit++)
-            printf(bit < 7 ? "%d, " : "%d", (state.m_type1_inmap >> (bit*3)) & 7);
+            printf(bit < 7 ? "%d," : "%d", (state.m_type1_inmap >> (bit*3)) & 7);
         printf(")\n");
         printf("Output map                            = (");
         for (int bit = 0; bit < 8; bit++)
-            printf(bit < 7 ? "%d, " : "%d", (state.m_type1_outmap >> (bit*3)) & 7);
+            printf(bit < 7 ? "%d," : "%d", (state.m_type1_outmap >> (bit*3)) & 7);
         printf(")\n");
     }
 
@@ -841,10 +854,16 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
     if (type == DecoCaseType_1)
     {
         state.decocass_type1_encrypt(bin_decoded, bin_recoded, NULL, bin_len);
-        printf("\nReencrypted: CRC32: %08X, %d bytes\n", Crc32(bin_recoded, bin_len), bin_len);
         if (memcmp(bin_data, bin_recoded, bin_len) != 0)
+        {
+            printf("\nReencrypted: CRC32: %08X, %d bytes\n", Crc32(bin_recoded, bin_len), bin_len);
             printf("Error: Reencryption mismatch!\n");
-        DumpMemory(bin_recoded, 128);//bin_len);
+            DumpMemory(bin_recoded, 128);//bin_len);
+        }
+        else
+        {
+            printf("\nReencrypted: CRC32: %08X, %d bytes, OK\n", Crc32(bin_recoded, bin_len), bin_len);
+        }
     }
 
     return 0;
@@ -862,6 +881,9 @@ int main(int argc, char** argv)
         printf("Decrypt Type 1:\n");
         printf("  decocase_tools decrypt1 <input_bin> <input_prom> [<output_bin>]\n");
         printf("\n");
+        //printf("Encrypt Type 1:\n");
+        //printf("  decocase_tools encrypt1 <input_bin> <input_prom> [<output_bin>]\n");
+        //printf("\n");
         printf("Decrypt Type 3:\n");
         printf("  decocase_tools decrypt3 <input_bin> <input_prom> [<output_bin>]\n");
         return 0;
