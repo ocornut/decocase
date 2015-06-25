@@ -7,8 +7,13 @@ https://en.wikipedia.org/wiki/DECO_Cassette_System
 
 Current status:
 
-**Decrypt type 1 game data only**
+**Decrypt type 1 game data**
 - Input: raw cassette dump (.bin) + PROM key (.rom)
 - Output: decrypted file (.decoded.bin)
 - Brute-forcing dongle settings (4^8 combination) instead of parsing the silly .txt file
+
+**Decrypt type 3 game data**
+- Input: raw cassette dump (.bin) + PROM key (.rom)
+- Output: decrypted file (.decoded.bin)
+- Brute-forcing bit swap settings (among 11 combinations supported by MAME - perhaps some are missing?)
 
