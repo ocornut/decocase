@@ -708,6 +708,11 @@ int decocase_process(DecoCaseAction action, DecoCaseType type, int argc, char** 
             for (int bit = 0; bit < 8; bit++)
                 printf(bit < 7 ? "%d," : "%d", (state.m_type1_inmap >> (bit*3)) & 7);
             printf(")\n");
+            printf(".txt: latched $%02X ($%02X/$%02X), uninverted: $%02X, inverted: $00, prom: $%02X\n",
+                f::GetMaskForType(state, T1LATCH) | f::GetMaskForType(state, T1LATCHINV),
+                f::GetMaskForType(state, T1LATCH), f::GetMaskForType(state, T1LATCHINV),
+                f::GetMaskForType(state, T1DIRECT),
+                f::GetMaskForType(state, T1PROM));
             printf("------------------------------------------------\n");
 
             if (print_old_way)
