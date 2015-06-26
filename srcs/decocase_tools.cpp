@@ -450,7 +450,7 @@ bool decocass_state::decocass_type1_encrypt(const UINT8* bin_src_decoded, UINT8*
     for (int addr = 0; addr < bin_len_to_decode; addr++)
     {
         UINT8 src = bin_src_decoded[addr];
-        UINT8 src_next = (addr+1 < bin_len) ? bin_src_decoded[addr+1] : 0x00; // FIXME: final byte undefined
+        UINT8 src_next = (addr+1 < bin_len) ? bin_src_decoded[addr+1] : 0x20; // FIXME: final byte undefined
         UINT8 dst = 0;
 
         offs_t promval = 0;
@@ -476,7 +476,7 @@ bool decocass_state::decocass_type1_encrypt(const UINT8* bin_src_decoded, UINT8*
         // re-encode mismatch
         if (bin_ref_encoded && bin_ref_encoded[addr] != dst)
         {
-            //printf("fail decrypt at %04x\n", addr);
+            //printf("fail decrypt at %04x: original %02X <> reencrypted %02X\n", addr, bin_ref_encoded[addr], dst);
             return false;
         }
     }
@@ -792,10 +792,10 @@ int decocase_process(DecoCaseAction action, DecoCaseType type, int argc, char** 
                 hdr[i] = (state.*state.m_dongle_r)(i);
 
             //if (memcmp(hdr+1, "HDRA", 4) == 0 || memcmp(hdr+1, "HDRB", 4) == 0 || memcmp(hdr+1, "HDRC", 4) == 0 || memcmp(hdr+1, "HDRD", 4) == 0)
-            if (memcmp(hdr+1, "HDR", 3) == 0 && isalpha(hdr[4]))
+            if (memcmp(hdr+1, "HDR", 3) == 0 && (hdr[4] >= 'A' && hdr[4] <= 'Z'))
             //if (memcmp(hdr+7, "DEC", 3) == 0)
             {
-                for (int i = 5; i < 1000; i++)
+                for (int i = 5; i < bin_len; i++)
                     hdr[i] = (state.*state.m_dongle_r)(i);
 
                 int score = 0;
@@ -806,7 +806,7 @@ int decocase_process(DecoCaseAction action, DecoCaseType type, int argc, char** 
                 for (int i = 32; i < 96; i++)
                     score += (hdr[i] == ' ') ? 1 : 0; 
 
-                bool reencode_ok = state.decocass_type1_encrypt(hdr, bin_recoded, bin_data, bin_len, 999);
+                bool reencode_ok = state.decocass_type1_encrypt(hdr, bin_recoded, bin_data, bin_len, bin_len-1);
                 if (!reencode_ok)
                     continue;
 
@@ -815,8 +815,8 @@ int decocase_process(DecoCaseAction action, DecoCaseType type, int argc, char** 
                     has_settings = true;
                     comb_candidates++;
 
-                    for (int i = 1000; i < bin_len; i++)
-                        hdr[i] = (state.*state.m_dongle_r)(i);
+                    //for (int i = 1000; i < bin_len; i++)
+                    //    hdr[i] = (state.*state.m_dongle_r)(i);
                     printf("\n#%d candidate settings: (Score: %d, Combination no: %lld, output CRC32: %08X)\n", comb_candidates, score, comb_no, Crc32(bin_output, bin_len));
                     f::PrintComb(state, false, bin_name, bin_data, bin_len, prom_name, prom_data, prom_len);
                     //if (flags & CrackFlags_DisplayNewBestScore)
@@ -945,12 +945,17 @@ int decocase_process(DecoCaseAction action, DecoCaseType type, int argc, char** 
     // Re-encrypt with same key
     if (action == DecoCaseAction_Decrypt && type == DecoCaseType_1)
     {
-        state.decocass_type1_encrypt(bin_output, bin_recoded, NULL, bin_len, bin_len);
+        bool ok = state.decocass_type1_encrypt(bin_output, bin_recoded, bin_data, bin_len, bin_len);
         if (memcmp(bin_data, bin_recoded, bin_len) != 0)
         {
             printf("\nReencrypted: CRC32: %08X, %d bytes\n", Crc32(bin_recoded, bin_len), bin_len);
-            printf("Error: Reencryption mismatch!\n");
+            printf("Error: Reencryption mismatch! (ok=%d)\n", ok);
             DumpMemory(bin_recoded, 128);//bin_len);
+            for (int i = 0; i < bin_len; i++)
+            {
+                if (bin_data[i] != bin_recoded[i])
+                    printf("mismatch at %04x: original %02X <> reencrypted %02X\n", i, bin_data[i], bin_recoded[i]);
+            }
         }
         else
         {
