@@ -21,7 +21,7 @@
 // v0.1 - initial release (type 1 only, not much tested)
 // v0.2 - fixes, early support for type 3
 // v0.3 - additional type 1 dongle bit remapping maps, more brute force options
-// v0.4x - encrypt type 1 + find correct decryption setting for type 1 based on encryption match
+// v0.4 - encrypt type 1 + find correct decryption setting for type 1 based on encryption match
 
 //-------------------------------------
 // USAGE
@@ -35,6 +35,12 @@
 #include <ctype.h>
 
 typedef unsigned char u8;
+
+enum DecoCaseAction
+{
+    DecoCaseAction_Decrypt,
+    DecoCaseAction_Encrypt
+};
 
 enum DecoCaseType
 {
@@ -55,10 +61,11 @@ typedef UINT32 offs_t;
 #define T1PROM 1
 #define T1LATCH 2
 #define T1LATCHINV 3
-#define T1PROMINV 4 // <-- not in MAME
-#define T1DIRECTINV 5 // <-- not in MAME
+#define T1PROMINV 4 // <-- not in MAME. may not exist in real dongles
+#define T1DIRECTINV 5 // <-- not in MAME. may not exist in real dongles
 
-//const int T1_COMB_BIT_TYPES = 4+2;
+#define TYPE1_MODE_COUNT 6
+const char* TYPE1_MODE_NAMES[TYPE1_MODE_COUNT] = { "DIRECT", "PROM", "LATCH", "LATCHINV", "PROMINV", "DIRECTINV" };
 
 /* dongle type #1: jumpers C and D assignments */
 #define MAKE_MAP(m0,m1,m2,m3,m4,m5,m6,m7)   \
@@ -89,6 +96,7 @@ enum {
 #define TYPE1_IO_MAPS_COUNT 7
 const UINT32 TYPE1_IO_MAPS[TYPE1_IO_MAPS_COUNT] =
 {
+    // Maps used by known games (use brute-force with CrackFlags_InOutOneSwap or CrackFlags_InOutAll to find others)
     MAKE_MAP(0,1,2,3,4,5,6,7),
     MAKE_MAP(0,1,2,3,5,4,6,7), // csuperas
     MAKE_MAP(0,1,3,2,4,5,6,7), // clocknch
@@ -96,10 +104,7 @@ const UINT32 TYPE1_IO_MAPS[TYPE1_IO_MAPS_COUNT] =
     MAKE_MAP(0,3,2,1,4,5,6,7), // cluckypo
     MAKE_MAP(2,1,0,3,4,5,6,7), // ctisland
     MAKE_MAP(0,1,2,4,3,5,6,7), // explorer  // not in mame
-
 };
-
-#define E5XX_MASK   0x02    /* use 0x0e for old style board */
 
 static UINT32 Crc32(const void* data, size_t data_size, UINT32 seed = 0) 
 { 
@@ -162,7 +167,23 @@ static bool WriteFile(const char* filename, const u8* data, int len)
     return true;
 }
 
-#define LOG(unknown,args)        printf(args)
+static void DumpMemory(const u8* data, int len, int columns = 16, int addr_offset = 0)
+{
+    for (int i = 0; i < len; i += columns)
+    {
+        printf("%04X: ", i+addr_offset);
+        for (int c = 0; c < columns; c++)
+            if (i+c < len)
+                printf("%02X ", data[i+c]);
+            else
+                printf("   ");
+        printf(" ; ");
+        for (int c = 0; c < columns; c++)
+            if (i+c < len)
+                printf("%c", isprint(data[i+c]) ? data[i+c] : ' ');
+        printf("\n");
+    }
+}
 
 struct decocass_state
 {
@@ -197,7 +218,7 @@ struct decocass_state
 
         m_type = DecoCaseType_1;
 
-        //m_type1_map = NULL;
+        memset(m_type1_map, 0, sizeof(m_type1_map));
         m_type1_inmap = MAKE_MAP(0,1,2,3,4,5,6,7);
         m_type1_outmap = MAKE_MAP(0,1,2,3,4,5,6,7);
 
@@ -230,14 +251,14 @@ struct decocass_state
     UINT8 decocass_type1_r(offs_t offset);
     UINT8 decocass_type3_r(offs_t offset);
 
-    bool decocass_type1_encrypt(const UINT8* bin_src_decoded, UINT8* bin_dst_encoded, const UINT8* bin_ref_encoded, int bin_len);
+    bool decocass_type1_encrypt(const UINT8* bin_src_decoded, UINT8* bin_dst_encoded, const UINT8* bin_ref_encoded, int bin_len, int bin_len_to_decode);
 };
 
 UINT8 decocass_state::decocass_type3_r(offs_t offset)
 {
     UINT8 data, save;
 
-    save = m_bin[offset];//m_mcu->upi41_master_r(space,0);
+    save = m_bin[offset];
     switch (m_type3_swap)
     {
     case TYPE3_SWAP_01:
@@ -380,12 +401,12 @@ UINT8 decocass_state::decocass_type3_r(offs_t offset)
 
 UINT8 decocass_state::decocass_type1_r(offs_t offset)
 {
-    if (!m_type1_map)
-        return 0x00;
+    //if (!m_type1_map)
+    //    return 0x00;
 
     UINT8 data = m_bin[offset];
     UINT8 *prom = m_prom;//space.machine().root_device().memregion("dongle")->base();
-    UINT8 save = data;    /* save the unmodifed data for the latch */
+    UINT8 save = data;    /* save the unmodified data for the latch */
 
     offs_t promaddr = 0;
     offs_t prommask = m_prom_mask;
@@ -402,9 +423,6 @@ UINT8 decocass_state::decocass_type1_r(offs_t offset)
 
     data = 0;
     promshift = 0;
-
-    // PROM, LATCHINV, PROM, DIRECT, PROM, PROM, LATCH, PROM
-
     for (int i=0;i<8;i++)
     {
         if (m_type1_map[i] == T1PROM)     { data |= (((prom[promaddr] >> promshift) & 1)                << T1MAP(i,m_type1_outmap)); promshift++; }
@@ -415,15 +433,12 @@ UINT8 decocass_state::decocass_type1_r(offs_t offset)
         if (m_type1_map[i] == T1DIRECTINV){ data |= ((1 - ((save >> T1MAP(i,m_type1_inmap)) & 1))       << T1MAP(i,m_type1_outmap)); }
     }
 
-    //LOG(3,("%10s 6502-PC: %04x decocass_type1_r(%02x): $%02x\n",
-    //    space.machine().time().as_string(6), space.device().safe_pcbase(), offset, data));
-
-    m_latch1 = save;        /* latch the data for the next A0 == 0 read */
+    m_latch1 = save; // latch the data for next read
 
     return data;
 }
 
-bool decocass_state::decocass_type1_encrypt(const UINT8* bin_src_decoded, UINT8* bin_dst_encoded, const UINT8* bin_ref_encoded, int bin_len)
+bool decocass_state::decocass_type1_encrypt(const UINT8* bin_src_decoded, UINT8* bin_dst_encoded, const UINT8* bin_ref_encoded, int bin_len, int bin_len_to_decode)
 {
     UINT8 prom_lut[32];
     memset(prom_lut, -1, 32);
@@ -432,7 +447,7 @@ bool decocass_state::decocass_type1_encrypt(const UINT8* bin_src_decoded, UINT8*
 
     UINT8 latch = 0;
 
-    for (int addr = 0; addr < bin_len; addr++)
+    for (int addr = 0; addr < bin_len_to_decode; addr++)
     {
         UINT8 src = bin_src_decoded[addr];
         UINT8 src_next = (addr+1 < bin_len) ? bin_src_decoded[addr+1] : 0x00; // FIXME: final byte undefined
@@ -460,31 +475,16 @@ bool decocass_state::decocass_type1_encrypt(const UINT8* bin_src_decoded, UINT8*
 
         // re-encode mismatch
         if (bin_ref_encoded && bin_ref_encoded[addr] != dst)
+        {
+            //printf("fail decrypt at %04x\n", addr);
             return false;
+        }
     }
 
     return true;
 }
 
-void DumpMemory(const u8* data, int len, int columns = 16, int addr_offset = 0)
-{
-    for (int i = 0; i < len; i += columns)
-    {
-        printf("%04X: ", i+addr_offset);
-        for (int c = 0; c < columns; c++)
-            if (i+c < len)
-                printf("%02X ", data[i+c]);
-            else
-                printf("   ");
-        printf(" ; ");
-        for (int c = 0; c < columns; c++)
-            if (i+c < len)
-                printf("%c", isprint(data[i+c]) ? data[i+c] : ' ');
-        printf("\n");
-    }
-}
-
-int decocase_decrypt(DecoCaseType type, int argc, char** argv)
+int decocase_process(DecoCaseAction action, DecoCaseType type, int argc, char** argv)
 {
     int arg = 0;
 
@@ -493,8 +493,6 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
     const char* bin_name = argv[arg++];
     if (const char* p = strrchr(bin_name, '/')) bin_name = p+1;
     else if (const char* p = strrchr(bin_name, '\\')) bin_name = p+1;
-    if (!ReadFile(bin_name, "rb", &bin_data, &bin_len))
-        return 1;
 
     //u8* txt_data;
     //int txt_len;
@@ -506,6 +504,37 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
     const char* prom_name = argv[arg++];
     if (const char* p = strrchr(prom_name, '/')) prom_name = p+1;
     else if (const char* p = strrchr(prom_name, '\\')) prom_name = p+1;
+
+    const char* arg_dongle = NULL;
+    const char* arg_remap = NULL;
+    if (action == DecoCaseAction_Decrypt && argc >= 4)
+    {
+        arg_dongle = argv[arg++];
+        arg_remap = argv[arg++];
+    }
+    else if (action == DecoCaseAction_Encrypt)
+    {
+        arg_dongle = argv[arg++];
+        arg_remap = argv[arg++];
+    }
+    if (arg_dongle && strncmp(arg_dongle, "dongle(", 7) != 0)
+    {
+        printf("Error: missing dongle() argument!\n");
+        return false;
+    }
+    if (arg_remap && strncmp(arg_remap, "remap(", 6) != 0)
+    {
+        printf("Error: missing remap() argument!\n");
+        return false;
+    }
+    if (arg_dongle) arg_dongle += 7;
+    if (arg_remap) arg_remap += 6;
+
+    const char* output_name = argc > arg ? argv[arg] : NULL;
+
+    // Load files
+    if (!ReadFile(bin_name, "rb", &bin_data, &bin_len))
+        return 1;
     if (!ReadFile(prom_name, "rb", &prom_data, &prom_len))
         return 1;
 
@@ -519,14 +548,58 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
     state.m_prom_mask = prom_len-1; // assume power of two
     state.reset();
 
-    bool found = false;
+    bool has_settings = false;
+    if (arg_dongle && arg_remap)
+    {
+        // Parse settings
+        for (int bit = 0; bit < 8; bit++)
+        {
+            const char* end = arg_dongle;
+            while (*end && isalpha(*end))
+                end++;
 
-    // bruteforce the 8-bit map
+            bool found_mode = false;
+            for (int mode = 0; mode != TYPE1_MODE_COUNT; mode++)
+            {
+                if (end-arg_dongle > 0 && strncmp(arg_dongle, TYPE1_MODE_NAMES[mode], end-arg_dongle) == 0)
+                {
+                    found_mode = true;
+                    state.m_type1_map[bit] = mode;
+                    break;
+                }
+            }
+            if (!found_mode)
+            {
+                printf("Error: unknown dongle mode for bit %d: '%.*s'\n", bit, end-arg_dongle, arg_dongle);
+                return false;
+            }
+            arg_dongle = end+1;
+        }
+
+        state.m_type1_inmap = 0;
+        for (int bit = 0; bit < 8; bit++)
+        {
+            int d = *arg_remap;
+            if (!isdigit(d) && !(d >= '0' && d <= '7'))
+            {
+                printf("Error: unknown remap bit number for %d\n", bit);
+                return false;
+            }
+            d -= '0';
+            state.m_type1_inmap |= (d << (bit * 3));
+            arg_remap += 2;
+        }
+        state.m_type1_outmap = state.m_type1_inmap;
+        has_settings = true;
+        printf("Got dongle setting from command-line.\n");
+    }
+
+    // Brute-force the 8-bit map
     // each bit can be either: 
     // we HAVE the information in the text file but it's been stored in an awkward way
     // rather than parsing it I am trying all 4^8 = 64K combinations..
 
-    if (0)
+    if (false && action == DecoCaseAction_Decrypt)
     {
         //{ T1PROM, T1PROM, T1LATCHINV, T1PROM, T1PROM, T1DIRECT, T1LATCH, T1PROM };
         //UINT8 known_map[8] = { T1PROM,T1LATCHINV,T1PROM,T1DIRECT,T1PROM,T1PROM,T1LATCH,T1PROM }; // Astro Fantasia DT-1074-C-0
@@ -546,20 +619,8 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
 
         state.reset();
         memcpy(state.m_type1_map, known_map, sizeof(known_map));
-        found = false;
-
-        //state.m_type1_inmap = state.m_type1_outmap = MAKE_MAP(2,1,0,3,4,5,6,7);
+        has_settings = false;
     }
-
-    // explorer encoded
-    //  5D 43 5D 4F
-
-    // explorer out (fail)
-    //  04 50 44 41 - 1010000, 1000100, 01000001
-
-    // _HDR
-    //  ?? 48 44 52 - 1001000, 1000100, 01010010
-    //                  xx                 x  x
 
     enum CrackFlags
     {
@@ -635,7 +696,38 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
                     comb_no /= 6;
                 }
             }
+        }
 
+        static void PrintComb(decocass_state& state, bool print_old_way, const char* bin_name, const u8* bin_data, int bin_len, const char* prom_name, const u8* prom_data, int prom_len)
+        {
+            printf("------------------------------------------------\n");
+            printf("Type1 cas '%s' (CRC %08X) prom '%s' (CRC %08X)\ndongle(", bin_name, Crc32(bin_data, bin_len), prom_name, Crc32(prom_data, prom_len));
+            for (int bit = 0; bit < 8; bit++)
+                printf(bit < 7 ? "%s," : "%s", TYPE1_MODE_NAMES[state.m_type1_map[bit]]);
+            printf(") remap(");
+            for (int bit = 0; bit < 8; bit++)
+                printf(bit < 7 ? "%d," : "%d", (state.m_type1_inmap >> (bit*3)) & 7);
+            printf(")\n");
+            printf("------------------------------------------------\n");
+
+            if (print_old_way)
+            {
+                printf("Latched bits                          = $%02X\n", f::GetMaskForType(state, T1LATCH) | f::GetMaskForType(state, T1LATCHINV));
+                printf("Latched bits uninverted               = $%02X\n", f::GetMaskForType(state, T1LATCH));
+                printf("Latched bits inverted                 = $%02X\n", f::GetMaskForType(state, T1LATCHINV));
+                printf("Input bits that are passed uninverted = $%02X\n", f::GetMaskForType(state, T1DIRECT));
+                printf("Input bits that are passed inverted   = $00\n");
+                printf("Remaining bits for addressing PROM    = $%02X\n", f::GetMaskForType(state, T1PROM));
+
+                printf("Input map                             = (");
+                for (int bit = 0; bit < 8; bit++)
+                    printf(bit < 7 ? "%d," : "%d", (state.m_type1_inmap >> (bit*3)) & 7);
+                printf(")\n");
+                printf("Output map                            = (");
+                for (int bit = 0; bit < 8; bit++)
+                    printf(bit < 7 ? "%d," : "%d", (state.m_type1_outmap >> (bit*3)) & 7);
+                printf(")\n");
+            }
         }
 
         static UINT8 GetMaskForType(decocass_state& state, UINT8 type)
@@ -648,7 +740,11 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
         }
     };
 
-    if (!found && type == DecoCaseType_1)
+    u8* bin_output = new u8[bin_len];
+    memset(bin_output, 0, bin_len);
+
+    int comb_candidates = 0;
+    if (action == DecoCaseAction_Decrypt && type == DecoCaseType_1 && !has_settings)
     {
         int flags = 0;
         flags |= CrackFlags_InOutList;
@@ -686,16 +782,15 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
             state.reset();
             f::SetupComb(state, comb_no, flags);
 
-            UINT8 hdr[96];
+            UINT8* hdr = bin_output;
             for (int i = 0; i < 5; i++)
                 hdr[i] = (state.*state.m_dongle_r)(i);
 
             //if (memcmp(hdr+1, "HDRA", 4) == 0 || memcmp(hdr+1, "HDRB", 4) == 0 || memcmp(hdr+1, "HDRC", 4) == 0 || memcmp(hdr+1, "HDRD", 4) == 0)
-            if (memcmp(hdr+1, "HDR", 3) == 0)
+            if (memcmp(hdr+1, "HDR", 3) == 0 && isalpha(hdr[4]))
             //if (memcmp(hdr+7, "DEC", 3) == 0)
             {
-                found = true;
-                for (int i = 5; i < 96; i++)
+                for (int i = 5; i < 1000; i++)
                     hdr[i] = (state.*state.m_dongle_r)(i);
 
                 int score = 0;
@@ -706,34 +801,45 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
                 for (int i = 32; i < 96; i++)
                     score += (hdr[i] == ' ') ? 1 : 0; 
 
-                bool reencode_ok = state.decocass_type1_encrypt(hdr, bin_recoded, bin_data, 96);
+                bool reencode_ok = state.decocass_type1_encrypt(hdr, bin_recoded, bin_data, bin_len, 999);
                 if (!reencode_ok)
                     continue;
 
-                if (comb_best_score <= score)
+                if (comb_best_score <= score && score > 25)
                 {
-                    //printf("new best score %d\n", score);
+                    has_settings = true;
+                    comb_candidates++;
+
+                    for (int i = 1000; i < bin_len; i++)
+                        hdr[i] = (state.*state.m_dongle_r)(i);
+                    printf("\n#%d candidate settings: (Score: %d, Combination no: %lld, output CRC32: %08X)\n", comb_candidates, score, comb_no, Crc32(bin_output, bin_len));
+                    f::PrintComb(state, false, bin_name, bin_data, bin_len, prom_name, prom_data, prom_len);
                     //if (flags & CrackFlags_DisplayNewBestScore)
-                      //  DumpMemory(hdr, 96, 16);
-                    comb_best_score = score;
-                    comb_best_no = comb_no;
+                        DumpMemory(hdr, 96, 16);
+
+                    if (comb_best_score < score)
+                    {
+                        comb_best_score = score;
+                        comb_best_no = comb_no;
+                    }
                 }
                 //break;
             }
         }
-        if (found)
+        if (has_settings)
         {
             state.reset();
             f::SetupComb(state, comb_best_no, flags);
         }
 
-        if (!found)
+        if (!has_settings)
         {
-            printf("Error: couldn't find a suitable bit mapping.\n");
+            printf("Error: couldn't brute-force suitable settings.\n");
             return 1;
         }
     }
-    if (!found && type == DecoCaseType_3)
+
+    if (action == DecoCaseAction_Decrypt && type == DecoCaseType_3 && !has_settings)
     {
         unsigned long long comb_count = TYPE3_SWAP_COUNT;
         unsigned long long comb_best_no = -1;
@@ -751,7 +857,6 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
 
             if (memcmp(hdr+1, "HDR", 3) == 0)// || memcmp(hdr+1, "HDRB", 4) == 0 || memcmp(hdr+1, "HDRC", 4) == 0 || memcmp(hdr+1, "HDRD", 4) == 0)
             {
-                found = true;
                 for (int i = 5; i < 64; i++)
                     hdr[i] = (state.*state.m_dongle_r)(i);
 
@@ -761,59 +866,31 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
                 if (comb_best_score < score)
                 {
                     //printf("new best score %d for comb %d\n", score, comb_no);
+                    has_settings = true;
                     comb_best_score = score;
                     comb_best_no = comb_no;
                 }
                 //break;
             }
         }
-        if (!found)
+        if (!has_settings)
         {
-            printf("Error: couldn't find a suitable bit swap mapping.\n");
+            printf("Error: couldn't brute-force suitable settings.\n");
             return 1;
         }
+
         state.reset();
         state.m_type3_swap = (INT32)comb_best_no;
-
-        printf("Using swap mode: %d\n", state.m_type3_swap);
+        printf("Type 3 using swap mode: %d\n", state.m_type3_swap);
     }
 
     if (type == DecoCaseType_1)
     {
-        printf("------------------------------------------------\n");
-        printf("Type1 cas '%s' (CRC %08X) prom '%s' (CRC %08X)\ndongle (", bin_name, Crc32(bin_data, bin_len), prom_name, Crc32(prom_data, prom_len));
-        for (int bit = 0; bit < 8; bit++)
-        {
-            const char* names[] = { "DIRECT", "PROM", "LATCH", "LATCHINV", "PROMINV", "DIRECTINV" };
-            printf(bit < 7 ? "%s," : "%s", names[state.m_type1_map[bit]]);
-        }
-        printf(") remap (");
-        for (int bit = 0; bit < 8; bit++)
-            printf(bit < 7 ? "%d," : "%d", (state.m_type1_inmap >> (bit*3)) & 7);
-        printf(")\n");
-        printf("------------------------------------------------\n");
-
-        printf("Latched bits                          = $%02X\n", f::GetMaskForType(state, T1LATCH) | f::GetMaskForType(state, T1LATCHINV));
-        printf("Latched bits uninverted               = $%02X\n", f::GetMaskForType(state, T1LATCH));
-        printf("Latched bits inverted                 = $%02X\n", f::GetMaskForType(state, T1LATCHINV));
-        printf("Input bits that are passed uninverted = $%02X\n", f::GetMaskForType(state, T1DIRECT));
-        printf("Input bits that are passed inverted   = $00\n");
-        printf("Remaining bits for addressing PROM    = $%02X\n", f::GetMaskForType(state, T1PROM));
-
-        printf("Input map                             = (");
-        for (int bit = 0; bit < 8; bit++)
-            printf(bit < 7 ? "%d," : "%d", (state.m_type1_inmap >> (bit*3)) & 7);
-        printf(")\n");
-        printf("Output map                            = (");
-        for (int bit = 0; bit < 8; bit++)
-            printf(bit < 7 ? "%d," : "%d", (state.m_type1_outmap >> (bit*3)) & 7);
-        printf(")\n");
+        printf("\n");
+        if (comb_candidates > 0)
+            printf("Picking first candidate with best score.\n");
+        f::PrintComb(state, true, bin_name, bin_data, bin_len, prom_name, prom_data, prom_len);
     }
-
-    // Decode
-    u8* bin_decoded = new u8[bin_len];
-    for (int i = 0; i < bin_len; i++)
-        bin_decoded[i] = (state.*state.m_dongle_r)(i);
 
     if (type == DecoCaseType_1)
     {
@@ -834,26 +911,36 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
     }
 
     // Dump header for reference
-    //printf("\nINPUT BIN:\n");
     printf("\nInput Cassette: CRC32: %08X, %d bytes\n", Crc32(bin_data, bin_len), bin_len);
     DumpMemory(bin_data, 128);
     printf("[...]\n");
 
+    // Decode/Encode
+    if (action == DecoCaseAction_Decrypt)
+    {
+        for (int i = 0; i < bin_len; i++)
+            bin_output[i] = (state.*state.m_dongle_r)(i);
+    }
+    if (action == DecoCaseAction_Encrypt)
+    {
+        state.decocass_type1_encrypt(bin_data, bin_output, NULL, bin_len, bin_len);
+    }
+
     // Write
     printf("\n");
-    if (arg < argc)
-        WriteFile(argv[arg++], bin_decoded, bin_len);
+    if (output_name)
+        WriteFile(output_name, bin_output, bin_len);
     else
-        printf("Output: CRC32: %08X, %d bytes\n", Crc32(bin_decoded, bin_len), bin_len);
+        printf("Output: CRC32: %08X, %d bytes\n", Crc32(bin_output, bin_len), bin_len);
 
     //printf("\nOUTPUT BIN (DECODED):\n");
-    DumpMemory(bin_decoded, 128);
+    DumpMemory(bin_output, 128);
     printf("[...]\n");
 
     // Re-encrypt with same key
-    if (type == DecoCaseType_1)
+    if (action == DecoCaseAction_Decrypt && type == DecoCaseType_1)
     {
-        state.decocass_type1_encrypt(bin_decoded, bin_recoded, NULL, bin_len);
+        state.decocass_type1_encrypt(bin_output, bin_recoded, NULL, bin_len, bin_len);
         if (memcmp(bin_data, bin_recoded, bin_len) != 0)
         {
             printf("\nReencrypted: CRC32: %08X, %d bytes\n", Crc32(bin_recoded, bin_len), bin_len);
@@ -869,6 +956,23 @@ int decocase_decrypt(DecoCaseType type, int argc, char** argv)
     return 0;
 }
 
+static void display_help()
+{
+    printf("Decrypt Type 1:\n");
+    printf("  # decotools decrypt1 <encrypted_bin> <input_prom> [<output_bin>]\n");
+    printf("  # decotools decrypt1 <encrypted_bin> <input_prom> dongle(x,x,x,x,x,x,x,x) remap(y,y,y,y,y,y,y,y) [<output_bin>]\n");
+    printf("\n");
+    printf("Decrypt Type 3:\n");
+    printf("  # decotools decrypt3 <encrypted_bin> <input_prom> [<output_bin>]\n");
+    printf("\n");
+    printf("Encrypt Type 1:\n");
+    printf("  # decotools encrypt1 <decrypted_bin> <input_prom> dongle(x,x,x,x,x,x,x,x) remap(y,y,y,y,y,y,y,y) [<output_bin>]\n");
+    printf("\n");
+    printf("Where each x is one of: PROM, DIRECT, LATCH, LATCHINV\n");
+    printf("And each y is 0-7 with all digits used once, e.g. remap(0,1,2,3,4,5,6,7)\n");
+    printf("\n");
+}
+
 int main(int argc, char** argv)
 {
     printf("------------------------------------------------\n");
@@ -876,30 +980,27 @@ int main(int argc, char** argv)
     printf(" http://gamepres.org\n");
     printf("------------------------------------------------\n");
 
-    if (argc < 4)
-    {
-        printf("Decrypt Type 1:\n");
-        printf("  decocase_tools decrypt1 <input_bin> <input_prom> [<output_bin>]\n");
-        printf("\n");
-        //printf("Encrypt Type 1:\n");
-        //printf("  decocase_tools encrypt1 <input_bin> <input_prom> [<output_bin>]\n");
-        //printf("\n");
-        printf("Decrypt Type 3:\n");
-        printf("  decocase_tools decrypt3 <input_bin> <input_prom> [<output_bin>]\n");
-        return 0;
-    }
+    if (argc < 4) { display_help(); return 0; }
 
     if (strcmp(argv[1], "decrypt1") == 0)
     {
         printf("Command: Decrypt Type 1\n");
-        int ret = decocase_decrypt(DecoCaseType_1, argc-2, argv+2);
+        int ret = decocase_process(DecoCaseAction_Decrypt, DecoCaseType_1, argc-2, argv+2);
         //getc(stdin);
         return ret;
     }
     else if (strcmp(argv[1], "decrypt3") == 0)
     {
         printf("Command: Decrypt Type 3\n");
-        int ret = decocase_decrypt(DecoCaseType_3, argc-2, argv+2);
+        int ret = decocase_process(DecoCaseAction_Decrypt, DecoCaseType_3, argc-2, argv+2);
+        //getc(stdin);
+        return ret;
+    }
+    else if (strcmp(argv[1], "encrypt1") == 0)
+    {
+        printf("Command: Encrypt Type 3\n");
+        if (argc < 6) { display_help(); return 0; }
+        int ret = decocase_process(DecoCaseAction_Encrypt, DecoCaseType_1, argc-2, argv+2);
         //getc(stdin);
         return ret;
     }

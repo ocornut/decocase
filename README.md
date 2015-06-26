@@ -8,9 +8,13 @@ https://en.wikipedia.org/wiki/DECO_Cassette_System
 Current status:
 
 **Decrypt type 1 game data**
-- Input: raw cassette dump (.bin) + PROM key (.rom)
-- Output: decrypted file (.decoded.bin)
-- Brute-forcing dongle settings, verify correct settings by re-encrypting
+- Input: raw cassette dump (.bin) + PROM key (.rom) + optional dongle settings
+- Output: decrypted cassette (.decoded.bin)
+- Brute-forcing dongle settings if not provided, verify correct settings by re-encrypting
+
+**Encrypt type 1 game data**
+- Input: decrypted cassette dump (.bin) + PROM key (.rom ) + dongle settings
+- Output: encrypted cassette (.bin)
 
 **Decrypt type 3 game data**
 - Input: raw cassette dump (.bin) + PROM key (.rom)
