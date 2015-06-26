@@ -1,4 +1,4 @@
-Tools for DECO Cassette System
+Tools for DECO Cassette System (デコカセ)
 
 for Game Preservation Society ( http://gamepres.org )
 
