@@ -16,12 +16,13 @@
 // see machine/decocass.c, drivers/decocass.c, etc.
 // https://github.com/mamedev/mame/blob/bf4f1beaa2cd03b4362e52599ddcf4c4a9c32f13/src/mame/machine/decocass.c#L363
 
-#define VERSION     "v0.4x (2015/06/25)"
+#define VERSION     "v0.41 (2015/06/25)"
 
-// v0.1 - initial release (type 1 only, not much tested)
-// v0.2 - fixes, early support for type 3
-// v0.3 - additional type 1 dongle bit remapping maps, more brute force options
-// v0.4 - encrypt type 1 + find correct decryption setting for type 1 based on encryption match
+// v0.10 - initial release (type 1 only, not much tested)
+// v0.20 - fixes, early support for type 3
+// v0.30 - additional type 1 dongle bit remapping maps, more brute force options
+// v0.40 - encrypt type 1 + find correct decryption setting for type 1 based on encryption match
+// v0.41 - calculate crc without leading and trailing 256 bytes and ignoring the first byte of each 256 block
 
 //-------------------------------------
 // USAGE
@@ -106,7 +107,7 @@ const UINT32 TYPE1_IO_MAPS[TYPE1_IO_MAPS_COUNT] =
     MAKE_MAP(0,1,2,4,3,5,6,7), // explorer  // not in mame
 };
 
-static UINT32 Crc32(const void* data, size_t data_size, UINT32 seed = 0) 
+static UINT32 Crc32(const void* data, size_t data_size, bool skip_deco_headers = false, UINT32 seed = 0) 
 { 
     static UINT32 crc32_lut[256] = { 0 };
     if (!crc32_lut[1])
@@ -126,8 +127,23 @@ static UINT32 Crc32(const void* data, size_t data_size, UINT32 seed = 0)
     const unsigned char* current = (const unsigned char*)data;
 
     // Known size
+    int addr = 0;
     while (data_size--) 
-        crc = (crc >> 8) ^ crc32_lut[(crc & 0xFF) ^ *current++]; 
+    {
+        unsigned char data = *current++;
+
+        if (skip_deco_headers)
+        {
+            if (addr < 256 || addr >= (int)data_size-256)
+                data = 0x00;
+            if ((addr & 255) == 0)
+                data = 0x00;
+        }
+
+        crc = (crc >> 8) ^ crc32_lut[(crc & 0xFF) ^ data]; 
+        addr++;
+    }
+
     return ~crc; 
 } 
 
@@ -701,7 +717,7 @@ int decocase_process(DecoCaseAction action, DecoCaseType type, int argc, char** 
         static void PrintComb(decocass_state& state, bool print_old_way, const char* bin_name, const u8* bin_data, int bin_len, const char* prom_name, const u8* prom_data, int prom_len)
         {
             printf("------------------------------------------------\n");
-            printf("Type1 cas '%s' (CRC %08X) prom '%s' (CRC %08X)\ndongle(", bin_name, Crc32(bin_data, bin_len), prom_name, Crc32(prom_data, prom_len));
+            printf("Type1 cas '%s' (CRC %08X skipping-headers %08X) prom '%s' (CRC %08X)\ndongle(", bin_name, Crc32(bin_data, bin_len), Crc32(bin_data, bin_len, true), prom_name, Crc32(prom_data, prom_len));
             for (int bit = 0; bit < 8; bit++)
                 printf(bit < 7 ? "%s," : "%s", TYPE1_MODE_NAMES[state.m_type1_map[bit]]);
             printf(") remap(");
@@ -817,7 +833,7 @@ int decocase_process(DecoCaseAction action, DecoCaseType type, int argc, char** 
 
                     //for (int i = 1000; i < bin_len; i++)
                     //    hdr[i] = (state.*state.m_dongle_r)(i);
-                    printf("\n#%d candidate settings: (Score: %d, Combination no: %lld, output CRC32: %08X)\n", comb_candidates, score, comb_no, Crc32(bin_output, bin_len));
+                    printf("\n#%d candidate settings: (Score: %d, Combination no: %lld, output CRC32: %08X, skipping-headers: %08X)\n", comb_candidates, score, comb_no, Crc32(bin_output, bin_len), Crc32(bin_output, bin_len, true));
                     f::PrintComb(state, false, bin_name, bin_data, bin_len, prom_name, prom_data, prom_len);
                     //if (flags & CrackFlags_DisplayNewBestScore)
                         DumpMemory(hdr, 96, 16);
@@ -916,7 +932,10 @@ int decocase_process(DecoCaseAction action, DecoCaseType type, int argc, char** 
     }
 
     // Dump header for reference
-    printf("\nInput Cassette: CRC32: %08X, %d bytes\n", Crc32(bin_data, bin_len), bin_len);
+    if (action == DecoCaseAction_Encrypt)
+        printf("\nInput Cassette: CRC32: %08X skipping-headers: %08X, %d bytes\n", Crc32(bin_data, bin_len), Crc32(bin_data, bin_len, true), bin_len);
+    else
+        printf("\nInput Cassette: CRC32: %08X, %d bytes\n", Crc32(bin_data, bin_len), bin_len);
     DumpMemory(bin_data, 128);
     printf("[...]\n");
 
@@ -935,6 +954,8 @@ int decocase_process(DecoCaseAction action, DecoCaseType type, int argc, char** 
     printf("\n");
     if (output_name)
         WriteFile(output_name, bin_output, bin_len);
+    else if (action == DecoCaseAction_Decrypt)
+        printf("Output: CRC32: %08X skipping-headers: %08X, %d bytes\n", Crc32(bin_output, bin_len), Crc32(bin_output, bin_len, true), bin_len);
     else
         printf("Output: CRC32: %08X, %d bytes\n", Crc32(bin_output, bin_len), bin_len);
 
