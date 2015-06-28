@@ -16,13 +16,14 @@
 // see machine/decocass.c, drivers/decocass.c, etc.
 // https://github.com/mamedev/mame/blob/bf4f1beaa2cd03b4362e52599ddcf4c4a9c32f13/src/mame/machine/decocass.c#L363
 
-#define VERSION     "v0.41 (2015/06/25)"
+#define VERSION     "v0.42 (2015/06/28)"
 
 // v0.10 - initial release (type 1 only, not much tested)
 // v0.20 - fixes, early support for type 3
 // v0.30 - additional type 1 dongle bit remapping maps, more brute force options
 // v0.40 - encrypt type 1 + find correct decryption setting for type 1 based on encryption match
 // v0.41 - calculate crc without leading and trailing 256 bytes and ignoring the first byte of each 256 block
+// v0.42 - fix crc without traiiling 256 bytes was incorrect
 
 //-------------------------------------
 // USAGE
@@ -128,15 +129,17 @@ static UINT32 Crc32(const void* data, size_t data_size, bool skip_deco_headers =
 
     // Known size
     int addr = 0;
-    while (data_size--) 
+    while (addr < data_size) 
     {
         unsigned char data = *current++;
 
         if (skip_deco_headers)
         {
-            if (addr < 256 || addr >= (int)data_size-256)
+            if (addr < 256)
                 data = 0x00;
-            if ((addr & 255) == 0)
+            else if (addr >= (int)data_size-256)
+                data = 0x00;
+            else if ((addr & 255) == 0)
                 data = 0x00;
         }
 
@@ -147,7 +150,7 @@ static UINT32 Crc32(const void* data, size_t data_size, bool skip_deco_headers =
     return ~crc; 
 } 
 
-static bool ReadFile(const char* filename, const char* mode, u8** out_data, int* out_len)
+static bool ReadFile(const char* filename, const char* mode, u8** out_data, int* out_len, bool crc_skip_deco_headers)
 {
     FILE* f = fopen(filename, mode);
     if (!f)
@@ -163,13 +166,16 @@ static bool ReadFile(const char* filename, const char* mode, u8** out_data, int*
     fclose(f);
     data[len] = 0; // Convenient for loading text, unnecessary for binaries
 
-    printf("Input: CRC32: %08X, %d bytes, File: %s\n", Crc32(data, len), len, filename);
+    if (crc_skip_deco_headers)
+        printf("Input: CRC32: %08X skipping-headers %08X, %d bytes, File: %s\n", Crc32(data, len), Crc32(data, len, true), len, filename);
+    else
+        printf("Input: CRC32: %08X, %d bytes, File: %s\n", Crc32(data, len), len, filename);
     *out_data = data;
     *out_len = len;
     return true;
 }
 
-static bool WriteFile(const char* filename, const u8* data, int len)
+static bool WriteFile(const char* filename, const u8* data, int len, bool crc_skip_deco_headers)
 {
     FILE* f = fopen(filename, "wb");
     if (!f)
@@ -179,7 +185,10 @@ static bool WriteFile(const char* filename, const u8* data, int len)
     }
     fwrite(data, 1, len, f);
     fclose(f);
-    printf("Output: CRC32: %08X, %d bytes, File: %s\n", Crc32(data, len), len, filename);
+    if (crc_skip_deco_headers)
+        printf("Output: CRC32: %08X skipping-headers %08X, %d bytes, File: %s\n", Crc32(data, len), Crc32(data, len, true), len, filename);
+    else
+        printf("Output: CRC32: %08X, %d bytes, File: %s\n", Crc32(data, len), len, filename);
     return true;
 }
 
@@ -549,9 +558,9 @@ int decocase_process(DecoCaseAction action, DecoCaseType type, int argc, char** 
     const char* output_name = argc > arg ? argv[arg] : NULL;
 
     // Load files
-    if (!ReadFile(bin_name, "rb", &bin_data, &bin_len))
+    if (!ReadFile(bin_name, "rb", &bin_data, &bin_len, action == DecoCaseAction_Encrypt))
         return 1;
-    if (!ReadFile(prom_name, "rb", &prom_data, &prom_len))
+    if (!ReadFile(prom_name, "rb", &prom_data, &prom_len, false))
         return 1;
 
     u8* bin_recoded = new u8[bin_len];
@@ -953,7 +962,7 @@ int decocase_process(DecoCaseAction action, DecoCaseType type, int argc, char** 
     // Write
     printf("\n");
     if (output_name)
-        WriteFile(output_name, bin_output, bin_len);
+        WriteFile(output_name, bin_output, bin_len, (action == DecoCaseAction_Decrypt));
     else if (action == DecoCaseAction_Decrypt)
         printf("Output: CRC32: %08X skipping-headers: %08X, %d bytes\n", Crc32(bin_output, bin_len), Crc32(bin_output, bin_len, true), bin_len);
     else
@@ -1029,7 +1038,7 @@ int main(int argc, char** argv)
     }
     else if (strcmp(argv[1], "encrypt1") == 0)
     {
-        printf("Command: Encrypt Type 3\n");
+        printf("Command: Encrypt Type 1\n");
         if (argc < 6) { display_help(); return 0; }
         int ret = decocase_process(DecoCaseAction_Encrypt, DecoCaseType_1, argc-2, argv+2);
         //getc(stdin);
