@@ -98,17 +98,17 @@ enum {
 
 const char* TYPE3_SWAP_NAMES[TYPE3_SWAP_COUNT] = 
 {
-    "TYPE3_SWAP_01",
-    "TYPE3_SWAP_12",
-    "TYPE3_SWAP_13",
-    "TYPE3_SWAP_24",
-    "TYPE3_SWAP_25",
-    "TYPE3_SWAP_34_0",
-    "TYPE3_SWAP_34_7",
-    "TYPE3_SWAP_45",
-    "TYPE3_SWAP_23_56",
-    "TYPE3_SWAP_56",
-    "TYPE3_SWAP_67",
+    "TYPE3_SWAP_01: Bit mapping: [7,6,5,4,3,2,1,0] => [7,6,5,4,3,2,0,L]",
+    "TYPE3_SWAP_12: Bit mapping: [7,6,5,4,3,2,1,0] => [7,6,5,4,3,1,2,L]",
+    "TYPE3_SWAP_13: Bit mapping: [7,6,5,4,3,2,1,0] => [7,6,5,4,1,2,3,L]",
+    "TYPE3_SWAP_24: Bit mapping: [7,6,5,4,3,2,1,0] => [7,6,5,2,3,4,1,L]",
+    "TYPE3_SWAP_25: Bit mapping: [7,6,5,4,3,2,1,0] => [7,6,2,4,3,5,1,L]",
+    "TYPE3_SWAP_34_0: Bit mapping: [7,6,5,4,3,2,1,0] => [7,6,5,3,4,2,1,L]",
+    "TYPE3_SWAP_34_7: Bit mapping: [7,6,5,4,3,2,1,0] => [0,6,5,3,4,2,1,L]",
+    "TYPE3_SWAP_45: Bit mapping: [7,6,5,4,3,2,1,0] => [7,6,4,5,3,2,1,L]",
+    "TYPE3_SWAP_23_56: Bit mapping: [7,6,5,4,3,2,1,0] => [7,5,6,4,2,3,1,L]",
+    "TYPE3_SWAP_56: Bit mapping: [7,6,5,4,3,2,1,0] => [7,5,6,4,3,2,1,L]",
+    "TYPE3_SWAP_67: Bit mapping: [7,6,5,4,3,2,1,0] => [6,7,5,4,3,2,1,L]",
 };
 
 #define TYPE1_IO_MAPS_COUNT 7
@@ -922,7 +922,7 @@ int decocase_process(DecoCaseAction action, DecoCaseType type, int argc, char** 
 
         state.reset();
         state.m_type3_swap = (INT32)comb_best_no;
-        printf("Type 3 using swap mode: %d (%s)\n", state.m_type3_swap, TYPE3_SWAP_NAMES[state.m_type3_swap]);
+        printf("Type 3 using swap mode: %d, %s\n", state.m_type3_swap, TYPE3_SWAP_NAMES[state.m_type3_swap]);
     }
 
     if (type == DecoCaseType_1)
