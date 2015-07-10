@@ -129,7 +129,7 @@ static UINT32 Crc32(const void* data, size_t data_size, bool skip_deco_headers =
 
     // Known size
     int addr = 0;
-    while (addr < data_size) 
+    while (addr < (int)data_size) 
     {
         unsigned char data = *current++;
 
@@ -228,7 +228,6 @@ struct decocass_state
     UINT32    m_type1_outmap;
 
     /* dongle type #3: status and patches */
-    INT32     m_type3_ctrs;         /* 12 bit counter stage */
     INT32     m_type3_d0_latch;     /* latched 8041-D0 value */
     INT32     m_type3_pal_19;       /* latched 1 for PAL input pin-19 */
     INT32     m_type3_swap;
@@ -247,9 +246,7 @@ struct decocass_state
         m_type1_inmap = MAKE_MAP(0,1,2,3,4,5,6,7);
         m_type1_outmap = MAKE_MAP(0,1,2,3,4,5,6,7);
 
-        m_type3_ctrs = 0;
         m_type3_d0_latch = 0;
-        m_type3_pal_19 = 0;
         m_type3_swap = 0;
     }
 
@@ -265,9 +262,7 @@ struct decocass_state
             break;
         case DecoCaseType_3:
             m_dongle_r = &decocass_state::decocass_type3_r;
-            m_type3_ctrs = 0;
             m_type3_d0_latch = 0;
-            m_type3_pal_19 = 0;
             m_type3_swap = TYPE3_SWAP_67;
             break;
         }
