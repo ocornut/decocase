@@ -16,7 +16,7 @@
 // see machine/decocass.c, drivers/decocass.c, etc.
 // https://github.com/mamedev/mame/blob/bf4f1beaa2cd03b4362e52599ddcf4c4a9c32f13/src/mame/machine/decocass.c#L363
 
-#define VERSION     "v0.42 (2015/06/28)"
+#define VERSION     "v0.43 (2015/07/10)"
 
 // v0.10 - initial release (type 1 only, not much tested)
 // v0.20 - fixes, early support for type 3
@@ -24,6 +24,7 @@
 // v0.40 - encrypt type 1 + find correct decryption setting for type 1 based on encryption match
 // v0.41 - calculate crc without leading and trailing 256 bytes and ignoring the first byte of each 256 block
 // v0.42 - fix crc without traiiling 256 bytes was incorrect
+// v0.43 - showing names for type 3
 
 //-------------------------------------
 // USAGE
@@ -93,6 +94,21 @@ enum {
     TYPE3_SWAP_56,
     TYPE3_SWAP_67,
     TYPE3_SWAP_COUNT
+};
+
+const char* TYPE3_SWAP_NAMES[TYPE3_SWAP_COUNT] = 
+{
+    "TYPE3_SWAP_01",
+    "TYPE3_SWAP_12",
+    "TYPE3_SWAP_13",
+    "TYPE3_SWAP_24",
+    "TYPE3_SWAP_25",
+    "TYPE3_SWAP_34_0",
+    "TYPE3_SWAP_34_7",
+    "TYPE3_SWAP_45",
+    "TYPE3_SWAP_23_56",
+    "TYPE3_SWAP_56",
+    "TYPE3_SWAP_67",
 };
 
 #define TYPE1_IO_MAPS_COUNT 7
@@ -906,7 +922,7 @@ int decocase_process(DecoCaseAction action, DecoCaseType type, int argc, char** 
 
         state.reset();
         state.m_type3_swap = (INT32)comb_best_no;
-        printf("Type 3 using swap mode: %d\n", state.m_type3_swap);
+        printf("Type 3 using swap mode: %d (%s)\n", state.m_type3_swap, TYPE3_SWAP_NAMES[state.m_type3_swap]);
     }
 
     if (type == DecoCaseType_1)
