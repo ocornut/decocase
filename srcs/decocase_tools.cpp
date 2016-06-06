@@ -16,7 +16,11 @@
 // see machine/decocass.c, drivers/decocass.c, etc.
 // https://github.com/mamedev/mame/blob/bf4f1beaa2cd03b4362e52599ddcf4c4a9c32f13/src/mame/machine/decocass.c#L363
 
-#define VERSION     "v0.43 (2015/07/10)"
+// e.g. 
+// # decrypt1 DT-1010-A-0.bin DE-0061-A-0.rom DT-1010-A-0.decoded.bin
+// from D:\T-Work\GitHub\decocase\data\decocase\data_all\01-HWY_CHASE\GOOD\DT-1010-A-0
+
+#define VERSION     "v0.44 (2016/06/06)"
 
 // v0.10 - initial release (type 1 only, not much tested)
 // v0.20 - fixes, early support for type 3
@@ -25,6 +29,7 @@
 // v0.41 - calculate crc without leading and trailing 256 bytes and ignoring the first byte of each 256 block
 // v0.42 - fix crc without traiiling 256 bytes was incorrect
 // v0.43 - showing names for type 3
+// v0.44 - added 'crc16' option
 
 //-------------------------------------
 // USAGE
@@ -518,6 +523,74 @@ bool decocass_state::decocass_type1_encrypt(const UINT8* bin_src_decoded, UINT8*
     }
 
     return true;
+}
+
+void crc16(UINT8 r3, UINT8& crc16_lsb, UINT8& crc16_msb)
+{
+    UINT8 c0, c1;
+    UINT8 crc16_lsb_old = crc16_lsb;
+    UINT8 crc16_msb_old = crc16_msb;
+    UINT8 crc16_feedback;
+
+    crc16_feedback = ((r3 >> 7) ^ crc16_msb) & 1;
+
+    /* rotate 16 bits */
+    c0 = crc16_lsb & 1;
+    c1 = crc16_msb & 1;
+    crc16_msb = (crc16_msb >> 1) | (c0 << 7);
+    crc16_lsb = (crc16_lsb >> 1) | (c1 << 7);
+
+    /* feedback into bit 7 */
+    if (crc16_feedback)
+        crc16_lsb |= 0x80;
+    else
+        crc16_lsb &= ~0x80;
+
+    /* feedback to bit 6 into bit 5 */
+    if (((crc16_lsb_old >> 6) ^ crc16_feedback) & 1)
+        crc16_lsb |= 0x20;
+    else
+        crc16_lsb &= ~0x20;
+
+    /* feedback to bit 1 into bit 0 */
+    if (((crc16_msb_old >> 1) ^ crc16_feedback) & 1)
+        crc16_msb |= 0x01;
+    else
+        crc16_msb &= ~0x01;
+}
+
+int decocase_crc(const char* bin_name)
+{
+    u8* bin_data;
+    int bin_len;
+    if (!ReadFile(bin_name, "rb", &bin_data, &bin_len, false))
+        return 1;
+
+    if ((bin_len % 256) != 0)
+        printf("Warning: file size isn't multiple of 256 bytes");
+
+    for (int bank_no = 0; bank_no < bin_len/256; bank_no++)
+    {
+        UINT8 crc16_lsb = 0, crc16_msb = 0;
+        UINT8* p = bin_data + bank_no * 256;
+        for (int i = 0; i < 256; i++)
+        {
+            UINT8 b = p[i];
+            //if (i >= 254)
+            //  b = 0x00;
+            crc16(b<<7, crc16_lsb, crc16_msb);
+            crc16(b<<6, crc16_lsb, crc16_msb);
+            crc16(b<<5, crc16_lsb, crc16_msb);
+            crc16(b<<4, crc16_lsb, crc16_msb);
+            crc16(b<<3, crc16_lsb, crc16_msb);
+            crc16(b<<2, crc16_lsb, crc16_msb);
+            crc16(b<<1, crc16_lsb, crc16_msb);
+            crc16(b<<0, crc16_lsb, crc16_msb);
+        }
+        printf("%03d: %02X%02X\n", bank_no, crc16_lsb, crc16_msb);
+    }
+ 
+    return 0;
 }
 
 int decocase_process(DecoCaseAction action, DecoCaseType type, int argc, char** argv)
@@ -1019,6 +1092,9 @@ static void display_help()
     printf("Encrypt Type 1:\n");
     printf("  # decotools encrypt1 <decrypted_bin> <input_prom> dongle(x,x,x,x,x,x,x,x) remap(y,y,y,y,y,y,y,y) [<output_bin>]\n");
     printf("\n");
+    printf("CRC16:\n");
+    printf("  # decotools crc16 <bin>\n");
+    printf("\n");
     printf("Where each x is one of: PROM, DIRECT, LATCH, LATCHINV\n");
     printf("And each y is 0-7 with all digits used once, e.g. remap(0,1,2,3,4,5,6,7)\n");
     printf("\n");
@@ -1031,7 +1107,7 @@ int main(int argc, char** argv)
     printf(" http://gamepres.org\n");
     printf("------------------------------------------------\n");
 
-    if (argc < 4) { display_help(); return 0; }
+    if (argc < 3) { display_help(); return 0; }
 
     if (strcmp(argv[1], "decrypt1") == 0)
     {
@@ -1052,6 +1128,14 @@ int main(int argc, char** argv)
         printf("Command: Encrypt Type 1\n");
         if (argc < 6) { display_help(); return 0; }
         int ret = decocase_process(DecoCaseAction_Encrypt, DecoCaseType_1, argc-2, argv+2);
+        //getc(stdin);
+        return ret;
+    }
+    else if (strcmp(argv[1], "crc16") == 0)
+    {
+        printf("Command: Encrypt Type 1\n");
+        if (argc < 3) { display_help(); return 0; }
+        int ret = decocase_crc(argv[2]);
         //getc(stdin);
         return ret;
     }
